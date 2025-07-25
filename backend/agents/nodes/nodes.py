@@ -66,9 +66,11 @@ class GeneralCodeGenerationNode(StructuredChainNode):
         sample_columns = columns[:3] if columns else ["col1", "col2", "col3"]
         
         fallback_code = f"""
-# Fallback general analysis code due to API error
+# General data analysis (NO VISUALIZATION)
 import pandas as pd
+import numpy as np
 
+print("=== GENERAL DATA ANALYSIS ===")
 print("Dataset Overview:")
 print(f"Shape: {{df.shape}}")
 print(f"Columns: {{df.columns.tolist()}}")
@@ -83,15 +85,19 @@ print(df.dtypes)
 print()
 
 print("Sample Data:")
-print(df.head())
+print(df.head(10))
+print()
+
+print("Missing Values:")
+print(df.isnull().sum())
 """
         
         return CodeAnalysis(
-            query_understanding=f"Fallback analysis for: {inputs.get('user_query', 'unknown query')}",
-            approach="Basic data exploration and statistics",
+            query_understanding=f"Fallback general analysis for: {inputs.get('user_query', 'unknown query')}",
+            approach="Basic data exploration and statistics - NO VISUALIZATION",
             required_columns=sample_columns,
             generated_code=fallback_code,
-            expected_output="Basic dataset overview, statistics, and sample data"
+            expected_output="Basic dataset overview, statistics, and sample data (text output only)"
         )
     
     def execute(self, state: AnalysisState) -> AnalysisState:
@@ -356,7 +362,7 @@ except Exception as e:
         })
 
 class CodeExecutionNode(BaseNode):
-    """Node 5: Execute Python Code (enhanced for better file path handling)"""
+    """Node 5: Execute Python Code with proper general/visualization distinction"""
     
     def __init__(self):
         super().__init__("CodeExecution")
@@ -370,16 +376,28 @@ class CodeExecutionNode(BaseNode):
             )
             return state.model_copy(update={"execution_result": result})
         
+        # Determine if this is a visualization query
+        is_visualization_query = (
+            state.classification and 
+            state.classification.query_type.value == "visualization"
+        )
+        
         try:
             # Prepare code for execution
-            full_code = self._prepare_code_for_execution(state.df, state.current_code)
+            full_code = self._prepare_code_for_execution(state.df, state.current_code, is_visualization_query)
             
             # Execute code
             output = self.py_tool.invoke(full_code)
             
-            # Check for created files with better path resolution
-            created_files = self._get_created_files()
-            viz_created = len(created_files) > 0 or self._check_visualization_created(state.current_code)
+            # For general queries, don't check for visualization files
+            if is_visualization_query:
+                created_files = self._get_created_files()
+                viz_created = len(created_files) > 0 or self._check_visualization_created(state.current_code)
+            else:
+                # For general queries, explicitly set no visualization
+                created_files = []
+                viz_created = False
+                self.logger.info("General query executed - no visualization files expected")
             
             # Create execution result
             result = ExecutionResult(
@@ -390,7 +408,7 @@ class CodeExecutionNode(BaseNode):
                 file_paths=created_files
             )
             
-            self.logger.info(f"✅ Code executed successfully. Visualization created: {viz_created}")
+            self.logger.info(f"✅ Code executed successfully. Query type: {'visualization' if is_visualization_query else 'general'}, Visualization created: {viz_created}")
             if created_files:
                 self.logger.info(f"Created files: {created_files}")
             
@@ -404,10 +422,13 @@ class CodeExecutionNode(BaseNode):
             
             return state.model_copy(update={"execution_result": result})
     
-    def _prepare_code_for_execution(self, df, code: str) -> str:
-        """Prepare code with necessary setup"""
+    def _prepare_code_for_execution(self, df, code: str, is_visualization: bool = False) -> str:
+        """Prepare code with necessary setup, conditionally including visualization imports"""
         df_dict = df.to_dict('records')
-        setup_code = f"""
+        
+        if is_visualization:
+            # Full setup for visualization queries
+            setup_code = f"""
 import pandas as pd
 import numpy as np
 import plotly.express as px
@@ -422,20 +443,35 @@ os.makedirs('plots', exist_ok=True)
 # Load the dataframe
 df = pd.DataFrame({df_dict})
 """
+        else:
+            # Minimal setup for general queries - NO VISUALIZATION IMPORTS
+            setup_code = f"""
+import pandas as pd
+import numpy as np
+import warnings
+warnings.filterwarnings('ignore')
+
+# Load the dataframe
+df = pd.DataFrame({df_dict})
+"""
+        
         return setup_code + "\n" + code
     
     def _check_visualization_created(self, code: str) -> bool:
-        """Check if visualization was created"""
+        """Check if visualization was created - only for visualization queries"""
         viz_indicators = [
             "plots/visualization.html",
             "write_html",
             "to_html",
-            "fig.write_html"
+            "fig.write_html",
+            "plotly",
+            "matplotlib",
+            "seaborn"
         ]
         return any(indicator in code for indicator in viz_indicators)
     
     def _get_created_files(self) -> list:
-        """Get list of created files with better path checking"""
+        """Get list of created files - only check if we expect visualization files"""
         files = []
         
         # Check multiple possible locations
@@ -453,19 +489,6 @@ df = pd.DataFrame({df_dict})
                     files.append(abs_path)
                     self.logger.info(f"Found visualization file: {abs_path}")
                 break
-        
-        # Also check if plots directory exists and list contents
-        plots_dir = os.path.abspath('plots')
-        if os.path.exists(plots_dir):
-            try:
-                plot_files = [f for f in os.listdir(plots_dir) if f.endswith('.html')]
-                for plot_file in plot_files:
-                    full_path = os.path.join(plots_dir, plot_file)
-                    if full_path not in files:
-                        files.append(full_path)
-                        self.logger.info(f"Found additional plot file: {full_path}")
-            except Exception as e:
-                self.logger.warning(f"Could not list plots directory: {e}")
         
         return files
 

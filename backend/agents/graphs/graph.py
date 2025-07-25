@@ -152,6 +152,10 @@ class DataAnalysisWorkflow:
                 self.logger.warning("Received dict result instead of AnalysisState object")
                 return result
             
+            # Log the actual result type and query type for debugging
+            query_type = result.classification.query_type.value if result.classification else "unknown"
+            self.logger.info(f"Processing workflow result for query type: {query_type}")
+            
             # Helper function to safely convert Pydantic to dict while preserving all data
             def safe_model_dump(obj):
                 if obj and hasattr(obj, 'model_dump'):
@@ -166,6 +170,10 @@ class DataAnalysisWorkflow:
             review_dict = safe_model_dump(result.code_review)
             execution_dict = safe_model_dump(result.execution_result)
             final_results_dict = safe_model_dump(result.final_results)
+            
+            # Log execution result for debugging
+            if execution_dict:
+                self.logger.info(f"Execution result - success: {execution_dict.get('success')}, visualization_created: {execution_dict.get('visualization_created')}")
             
             output = {
                 "success": True,
@@ -189,7 +197,7 @@ class DataAnalysisWorkflow:
             overall_success = execution_success or final_success or has_code
             output["success"] = overall_success
             
-            self.logger.info(f"Workflow result processed: success={overall_success}")
+            self.logger.info(f"Workflow result processed: success={overall_success}, query_type={query_type}")
             self.logger.debug(f"Output contains - classification: {bool(classification_dict)}, analysis: {bool(analysis_dict)}, execution: {bool(execution_dict)}, final_results: {bool(final_results_dict)}")
             
             return output

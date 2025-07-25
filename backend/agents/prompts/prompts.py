@@ -25,7 +25,7 @@ Focus on the user's intent - do they want to see data or visualize data?
 
 # ===== NODE 2A & 2B: QUERY ANALYSIS & CODE GENERATION =====
 PROMPT_GENERAL_CODE_GENERATION = ChatPromptTemplate.from_template("""
-You are a Python data analysis expert. Generate code for GENERAL data analysis (no visualization).
+You are a Python data analysis expert. Generate code for GENERAL data analysis ONLY (NO VISUALIZATION).
 
 User Query: "{user_query}"
 Classification: {classification}
@@ -36,20 +36,28 @@ Dataset Info:
 - Data Types: {data_types}
 - Sample: {sample_data}
 
-Generate Python code using pandas for:
+Generate Python code using ONLY pandas for:
 - Data filtering, aggregation, statistics, calculations
-- Print clear, formatted results
+- Print clear, formatted results to console
 - Handle missing data appropriately
 - Use df as the dataframe variable
+- NO PLOTTING, NO CHARTS, NO VISUALIZATION LIBRARIES
+
+IMPORTANT RESTRICTIONS:
+- DO NOT import plotly, matplotlib, seaborn, or any visualization libraries
+- DO NOT create any plots, charts, or visual outputs
+- DO NOT save any HTML files
+- Output should be TEXT ONLY (print statements, tables, summaries)
 
 Provide structured output:
-- query_understanding: What the user wants
-- approach: Your solution approach  
+- query_understanding: What the user wants (data analysis only)
+- approach: Your solution approach (text-based analysis only)
 - required_columns: List of column names as array (e.g., ["col1", "col2"])
-- generated_code: Complete Python code
-- expected_output: What the code will produce
+- generated_code: Complete Python code (pandas only, no visualization)
+- expected_output: What the code will produce (text/numerical results only)
 
 IMPORTANT: required_columns must be a JSON array of strings, not a string representation.
+Focus on providing clear, numerical/textual answers to the user's question.
 """)
 
 PROMPT_VISUALIZATION_CODE_GENERATION = ChatPromptTemplate.from_template("""

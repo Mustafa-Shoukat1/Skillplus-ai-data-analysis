@@ -168,6 +168,15 @@ async def get_analysis_result(task_id: str):
     
     logger.debug(f"Extracted dicts - classification: {bool(classification_dict)}, analysis: {bool(analysis_dict)}, execution: {bool(execution_dict)}, final_results: {bool(final_results_dict)}")
     
+    # Check what query type we're dealing with
+    query_type = classification_dict.get("query_type", "unknown")
+    if hasattr(query_type, 'value'):
+        query_type_str = query_type.value
+    else:
+        query_type_str = str(query_type).lower()
+    
+    logger.info(f"Processing result for query type: {query_type_str}")
+    
     # Extract summary from final results
     summary = final_results_dict.get("summary") if final_results_dict else None
     
@@ -192,47 +201,57 @@ async def get_analysis_result(task_id: str):
     # ENHANCED: Extract visualization HTML content with multiple fallback methods
     chart_html = None
     
-    # Method 1: Check if HTML is directly stored in analysis data
-    chart_html = analysis_data.get("visualization_html")
-    
-    # Method 2: Check database for saved visualization HTML
-    if not chart_html and result.get("analysis_id"):
-        try:
-            async with get_async_db() as db:
-                db_result = await db.execute(
-                    select(AnalysisResult).where(AnalysisResult.id == result["analysis_id"])
-                )
-                analysis_record = db_result.scalar_one_or_none()
-                if analysis_record and analysis_record.visualization_html:
-                    chart_html = analysis_record.visualization_html
-                    logger.info(f"Loaded HTML from database for analysis {result['analysis_id']}")
-        except Exception as e:
-            logger.warning(f"Could not load HTML from database: {e}")
-    
-    # Method 3: Check if there are HTML files created
-    if not chart_html and execution_dict:
-        file_paths = execution_dict.get("file_paths", [])
-        for file_path in file_paths:
-            if file_path.endswith('.html'):
-                try:
-                    with open(file_path, 'r', encoding='utf-8') as f:
-                        chart_html = f.read()
-                    logger.info(f"Loaded HTML content from {file_path}")
-                    break
-                except Exception as e:
-                    logger.warning(f"Could not read HTML file {file_path}: {e}")
-    
-    # Method 4: Check standard plots directory
-    if not chart_html:
-        plots_dir = os.path.abspath('plots')
-        html_file = os.path.join(plots_dir, 'visualization.html')
-        if os.path.exists(html_file):
+    # For visualization queries, try multiple methods to get HTML
+    if query_type_str == "visualization":
+        logger.info("Looking for visualization HTML content...")
+        
+        # Method 1: Check if HTML is directly stored in analysis data
+        chart_html = analysis_data.get("visualization_html")
+        if chart_html:
+            logger.info(f"Found HTML in analysis data: {len(chart_html)} characters")
+        
+        # Method 2: Check database for saved visualization HTML
+        if not chart_html and result.get("analysis_id"):
             try:
-                with open(html_file, 'r', encoding='utf-8') as f:
-                    chart_html = f.read()
-                logger.info(f"Loaded HTML from standard location: {html_file}")
+                async with get_async_db() as db:
+                    db_result = await db.execute(
+                        select(AnalysisResult).where(AnalysisResult.id == result["analysis_id"])
+                    )
+                    analysis_record = db_result.scalar_one_or_none()
+                    if analysis_record and analysis_record.visualization_html:
+                        chart_html = analysis_record.visualization_html
+                        logger.info(f"Loaded HTML from database for analysis {result['analysis_id']}: {len(chart_html)} characters")
             except Exception as e:
-                logger.warning(f"Could not read HTML from standard location: {e}")
+                logger.warning(f"Could not load HTML from database: {e}")
+        
+        # Method 3: Check if there are HTML files created
+        if not chart_html and execution_dict:
+            file_paths = execution_dict.get("file_paths", [])
+            logger.debug(f"Checking file paths: {file_paths}")
+            for file_path in file_paths:
+                if file_path.endswith('.html'):
+                    try:
+                        with open(file_path, 'r', encoding='utf-8') as f:
+                            chart_html = f.read()
+                        logger.info(f"Loaded HTML content from {file_path}: {len(chart_html)} characters")
+                        break
+                    except Exception as e:
+                        logger.warning(f"Could not read HTML file {file_path}: {e}")
+        
+        # Method 4: Check standard plots directory
+        if not chart_html:
+            plots_dir = os.path.abspath('plots')
+            html_file = os.path.join(plots_dir, 'visualization.html')
+            logger.debug(f"Checking standard location: {html_file}")
+            if os.path.exists(html_file):
+                try:
+                    with open(html_file, 'r', encoding='utf-8') as f:
+                        chart_html = f.read()
+                    logger.info(f"Loaded HTML from standard location: {html_file}: {len(chart_html)} characters")
+                except Exception as e:
+                    logger.warning(f"Could not read HTML from standard location: {e}")
+            else:
+                logger.warning(f"No HTML file found at standard location: {html_file}")
     
     # Log visualization status
     logger.info(f"Visualization HTML found: {bool(chart_html)}")

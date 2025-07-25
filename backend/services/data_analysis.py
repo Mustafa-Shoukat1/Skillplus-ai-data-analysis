@@ -67,39 +67,59 @@ class DataAnalysisService:
         execution_data = safe_extract_dict(analysis_data.get("execution"), {})
         final_results_data = safe_extract_dict(analysis_data.get("final_results"), {})
         
-        # Log what we extracted
-        logger.debug(f"Extracted classification: {bool(classification_data)}")
-        logger.debug(f"Extracted analysis: {bool(analysis_code_data)}")
-        logger.debug(f"Extracted execution: {bool(execution_data)}")
-        logger.debug(f"Extracted final_results: {bool(final_results_data)}")
+        # Determine query type - FIXED to handle both enum and string values
+        query_type = classification_data.get("query_type", "unknown")
         
-        # Handle visualization HTML content - ENHANCED
+        # Handle both enum values and string values
+        if hasattr(query_type, 'value'):
+            query_type_str = query_type.value  # Extract string from enum
+        else:
+            query_type_str = str(query_type).lower()
+        
+        is_visualization_query = query_type_str == "visualization"
+        
+        logger.info(f"Query type: {query_type_str}, Is visualization: {is_visualization_query}")
+        
+        # Handle visualization HTML content - ONLY for visualization queries
         visualization_html = None
         
-        # Method 1: Check execution results for file paths
-        if execution_data.get("visualization_created") and execution_data.get("file_paths"):
-            for file_path in execution_data.get("file_paths", []):
-                if file_path.endswith('.html'):
+        if is_visualization_query:
+            logger.info("Processing visualization query - checking for HTML content")
+            
+            # Method 1: Check execution results for file paths
+            if execution_data.get("visualization_created") and execution_data.get("file_paths"):
+                for file_path in execution_data.get("file_paths", []):
+                    if file_path.endswith('.html'):
+                        try:
+                            logger.info(f"Attempting to read visualization file: {file_path}")
+                            with open(file_path, 'r', encoding='utf-8') as f:
+                                visualization_html = f.read()
+                            logger.info(f"Successfully read {len(visualization_html)} characters from {file_path}")
+                            break
+                        except Exception as e:
+                            logger.warning(f"Could not read visualization file {file_path}: {e}")
+            
+            # Method 2: Check standard plots directory (for all visualization queries)
+            if not visualization_html:
+                plots_dir = os.path.abspath('plots')
+                html_file = os.path.join(plots_dir, 'visualization.html')
+                if os.path.exists(html_file):
                     try:
-                        logger.info(f"Attempting to read visualization file: {file_path}")
-                        with open(file_path, 'r', encoding='utf-8') as f:
+                        with open(html_file, 'r', encoding='utf-8') as f:
                             visualization_html = f.read()
-                        logger.info(f"Successfully read {len(visualization_html)} characters from {file_path}")
-                        break
+                        logger.info(f"Read visualization HTML from standard location: {len(visualization_html)} characters")
                     except Exception as e:
-                        logger.warning(f"Could not read visualization file {file_path}: {e}")
-        
-        # Method 2: Check standard plots directory
-        if not visualization_html:
-            plots_dir = os.path.abspath('plots')
-            html_file = os.path.join(plots_dir, 'visualization.html')
-            if os.path.exists(html_file):
-                try:
-                    with open(html_file, 'r', encoding='utf-8') as f:
-                        visualization_html = f.read()
-                    logger.info(f"Read visualization HTML from standard location: {len(visualization_html)} characters")
-                except Exception as e:
-                    logger.warning(f"Could not read from standard location {html_file}: {e}")
+                        logger.warning(f"Could not read from standard location {html_file}: {e}")
+                else:
+                    logger.warning(f"No HTML file found at: {html_file}")
+            
+            # Method 3: Check if HTML is already in analysis_data
+            if not visualization_html and analysis_data.get("visualization_html"):
+                visualization_html = analysis_data["visualization_html"]
+                logger.info(f"Found HTML in analysis data: {len(visualization_html)} characters")
+                
+        else:
+            logger.info(f"Skipping visualization HTML detection for {query_type_str} query")
         
         # Create database record with comprehensive data extraction
         db_result = AnalysisResult(
@@ -107,7 +127,7 @@ class DataAnalysisService:
             success=analysis_data.get("success", False),
             
             # Classification data - with detailed extraction
-            query_type=classification_data.get("query_type"),
+            query_type=query_type_str,  # Store as string
             classification_reasoning=classification_data.get("reasoning"),
             user_intent=classification_data.get("user_intent"),
             requires_data_filtering=classification_data.get("requires_data_filtering"),
@@ -162,6 +182,7 @@ class DataAnalysisService:
             logger.debug(f"Saved query_understanding: {bool(db_result.query_understanding)}")
             logger.debug(f"Saved execution_output: {bool(db_result.execution_output)}")
             logger.debug(f"Saved final_answer: {bool(db_result.final_answer)}")
+            logger.debug(f"Saved visualization_html: {bool(db_result.visualization_html)}")
             
         except Exception as e:
             logger.error(f"❌ Failed to save analysis result: {e}")
