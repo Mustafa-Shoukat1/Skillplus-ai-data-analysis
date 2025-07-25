@@ -113,9 +113,20 @@ export default function Home() {
   }
 
   const handleAnalysisGenerated = (analysis: any) => {
-    const updatedAnalyses = [...analyses, analysis]
-    setAnalyses(updatedAnalyses)
-    localStorage.setItem("analyses", JSON.stringify(updatedAnalyses))
+    console.log("Handling new analysis:", analysis.id)
+    
+    try {
+      // SAFE: Add to state (this doesn't use localStorage directly)
+      setAnalyses(prev => [...prev, analysis])
+      
+      // Don't try to store in localStorage here - it's already handled in the generator
+      console.log("Analysis added to state successfully")
+      
+    } catch (error) {
+      console.error("Error handling analysis:", error)
+      // Don't show error to user since analysis was successful
+      // Just log and continue
+    }
   }
 
   const handleAddUser = (newUserData: any) => {

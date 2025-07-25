@@ -75,7 +75,7 @@ async def get_async_db_dependency() -> AsyncGenerator[AsyncSession, None]:
         yield session
 
 async def run_migrations():
-    """Run database migrations (add visualization_html column if missing)"""
+    """Run database migrations including analysis_id updates"""
     try:
         async with async_engine.begin() as conn:
             # Check current table structure
@@ -84,6 +84,45 @@ async def run_migrations():
             
             logger.info(f"Current analysis_results columns: {columns}")
             
+            # Ensure analysis_id column exists and is properly indexed
+            if 'analysis_id' not in columns:
+                logger.info("Adding analysis_id column to analysis_results table")
+                await conn.execute(text("ALTER TABLE analysis_results ADD COLUMN analysis_id TEXT UNIQUE"))
+                await conn.execute(text("CREATE INDEX IF NOT EXISTS idx_analysis_id ON analysis_results(analysis_id)"))
+                logger.info("✅ Migration completed: added analysis_id column with index")
+            else:
+                logger.info("analysis_id column already exists")
+                # Ensure it has proper constraints
+                await conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS idx_analysis_id_unique ON analysis_results(analysis_id)"))
+            
+            # Update existing records without analysis_id
+            result = await conn.execute(text("SELECT COUNT(*) FROM analysis_results WHERE analysis_id IS NULL OR analysis_id = ''"))
+            null_count = result.fetchone()[0]
+            
+            if null_count > 0:
+                logger.info(f"Found {null_count} records without analysis_id, updating...")
+                
+                # Get records without analysis_id
+                result = await conn.execute(text("SELECT id, created_at FROM analysis_results WHERE analysis_id IS NULL OR analysis_id = ''"))
+                records = result.fetchall()
+                
+                import uuid
+                import time
+                
+                for record in records:
+                    db_id, created_at = record
+                    # Generate analysis_id based on creation time or current time
+                    timestamp = int(time.mktime(created_at.timetuple())) if created_at else int(time.time())
+                    unique_suffix = str(uuid.uuid4())[:8]
+                    new_analysis_id = f"analysis_{timestamp}_{unique_suffix}"
+                    
+                    await conn.execute(
+                        text("UPDATE analysis_results SET analysis_id = :analysis_id WHERE id = :id"),
+                        {"analysis_id": new_analysis_id, "id": db_id}
+                    )
+                
+                logger.info(f"✅ Updated {null_count} records with analysis_id")
+            
             if 'visualization_html' not in columns:
                 logger.info("Adding visualization_html column to analysis_results table")
                 await conn.execute(text("ALTER TABLE analysis_results ADD COLUMN visualization_html TEXT"))
@@ -91,9 +130,25 @@ async def run_migrations():
             else:
                 logger.info("visualization_html column already exists")
             
+            # Add template_id column if missing
+            if 'template_id' not in columns:
+                logger.info("Adding template_id column to analysis_results table")
+                await conn.execute(text("ALTER TABLE analysis_results ADD COLUMN template_id INTEGER REFERENCES ai_templates(id)"))
+                logger.info("✅ Migration completed: added template_id column")
+            else:
+                logger.info("template_id column already exists")
+            
             # Remove key_insights column if it exists (legacy cleanup)
             if 'key_insights' in columns:
                 logger.info("⚠️ Note: key_insights column exists but is not used")
+            
+            # Add is_visible column if missing
+            if 'is_visible' not in columns:
+                logger.info("Adding is_visible column to analysis_results table")
+                await conn.execute(text("ALTER TABLE analysis_results ADD COLUMN is_visible BOOLEAN DEFAULT 1 NOT NULL"))
+                logger.info("✅ Migration completed: added is_visible column")
+            else:
+                logger.info("is_visible column already exists")
                 
     except Exception as e:
         logger.warning(f"Migration warning: {e}")
@@ -105,6 +160,7 @@ async def init_db():
             await conn.run_sync(Base.metadata.create_all)
         await run_migrations()
         await create_default_user()
+        await create_default_templates()
         logger.info("✅ Database tables created successfully")
     except Exception as e:
         logger.error(f"❌ Failed to create database tables: {e}")
@@ -148,4 +204,14 @@ async def create_default_user():
         db.add(default_user)
         await db.commit()
         logger.info("✅ Default user created")
+
+async def create_default_templates():
+    """Create default templates during initialization"""
+    try:
+        async with get_async_db() as db:
+            from services.template_service import TemplateService
+            await TemplateService.create_default_templates(db)
+            logger.info("✅ Default templates created/verified")
+    except Exception as e:
+        logger.warning(f"Could not create default templates: {e}")
 

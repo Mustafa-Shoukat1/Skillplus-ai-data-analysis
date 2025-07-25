@@ -2,9 +2,10 @@
 
 import type React from "react"
 import { useState, useRef } from "react"
+import { uploadFile } from "@/lib/api"
 
 interface FileUploadProps {
-  onDataLoaded: (data: any[], departments: string[], analytics: any) => void
+  onDataLoaded: (data: any[], departments: string[], analytics: any, fileId?: string) => void
 }
 
 export default function FileUpload({ onDataLoaded }: FileUploadProps) {
@@ -126,45 +127,106 @@ export default function FileUpload({ onDataLoaded }: FileUploadProps) {
     return { employees, departments, analytics }
   }
 
-  const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]
     if (!file) return
 
-    if (!file.name.toLowerCase().endsWith(".csv")) {
-      setError("Please select a CSV file")
+    // Check file type
+    const allowedTypes = ['.csv', '.xlsx', '.xls']
+    const fileExtension = '.' + file.name.split('.').pop()?.toLowerCase()
+    
+    if (!allowedTypes.includes(fileExtension)) {
+      setError("Please select a CSV or Excel file")
       return
     }
 
     setUploading(true)
     setError("")
 
-    const reader = new FileReader()
+    try {
+      console.log("Starting file upload to backend...")
+      
+      // ALWAYS upload file to backend first
+      const uploadResponse = await uploadFile(file)
 
-    reader.onload = (e) => {
-      try {
-        const csvText = e.target?.result as string
-        const { employees, departments, analytics } = processCSVData(csvText)
-
-        onDataLoaded(employees, departments, analytics)
-
-        // Store in localStorage for persistence
-        localStorage.setItem("employeeData", JSON.stringify(employees))
-        localStorage.setItem("departmentData", JSON.stringify(departments))
-        localStorage.setItem("analyticsData", JSON.stringify(analytics))
-      } catch (error) {
-        console.error("Error parsing CSV:", error)
-        setError("Error parsing CSV file. Please check the format.")
-      } finally {
-        setUploading(false)
+      if (!uploadResponse.success) {
+        throw new Error(uploadResponse.error || 'Upload failed')
       }
-    }
 
-    reader.onerror = () => {
-      setError("Error reading file")
+      console.log("Backend upload successful:", uploadResponse.data)
+      const uploadData = uploadResponse.data
+
+      // For CSV files, ALSO process locally for immediate display
+      if (file.name.toLowerCase().endsWith('.csv')) {
+        console.log("Processing CSV locally for immediate display...")
+        
+        const reader = new FileReader()
+        
+        reader.onload = (e) => {
+          try {
+            const csvText = e.target?.result as string
+            const { employees, departments, analytics } = processCSVData(csvText)
+            
+            console.log("Local CSV processing completed:", {
+              employees: employees.length,
+              departments: departments.length,
+              analytics
+            })
+            
+            // Call with backend file_id for future analysis
+            onDataLoaded(employees, departments, analytics, uploadData.file_id)
+
+            // Store in localStorage for persistence
+            localStorage.setItem("employeeData", JSON.stringify(employees))
+            localStorage.setItem("departmentData", JSON.stringify(departments))
+            localStorage.setItem("analyticsData", JSON.stringify(analytics))
+            localStorage.setItem("uploadedFileId", uploadData.file_id)
+            
+            console.log("Data loaded and stored with file_id:", uploadData.file_id)
+          } catch (error) {
+            console.error("Error parsing CSV:", error)
+            setError("Error parsing CSV file. Please check the format.")
+          }
+        }
+
+        reader.onerror = () => {
+          setError("Error reading file")
+        }
+
+        reader.readAsText(file)
+      } else {
+        // For Excel files, use backend data or create placeholder
+        console.log("Excel file uploaded, using backend data...")
+        
+        // Create placeholder data structure for Excel files
+        const placeholderData = {
+          employees: [],
+          departments: [],
+          analytics: { 
+            totalEmployees: 0, 
+            avgPerformance: 0, 
+            departments: [],
+            summary: uploadData.summary || {}
+          }
+        }
+        
+        onDataLoaded(
+          placeholderData.employees, 
+          placeholderData.departments, 
+          placeholderData.analytics, 
+          uploadData.file_id
+        )
+        
+        localStorage.setItem("uploadedFileId", uploadData.file_id)
+        console.log("Excel file processed with file_id:", uploadData.file_id)
+      }
+
+    } catch (error) {
+      console.error("Upload error:", error)
+      setError(error instanceof Error ? error.message : "Upload failed")
+    } finally {
       setUploading(false)
     }
-
-    reader.readAsText(file)
   }
 
   const generateSampleCSV = () => {
@@ -264,13 +326,13 @@ export default function FileUpload({ onDataLoaded }: FileUploadProps) {
   return (
     <div className="space-y-6">
       <div className="border-2 border-dashed border-white/30 rounded-lg p-8 text-center hover:border-blue-400/50 transition-colors glass">
-        <input ref={fileInputRef} type="file" accept=".csv" onChange={handleFileUpload} className="hidden" />
+        <input ref={fileInputRef} type="file" accept=".csv,.xlsx,.xls" onChange={handleFileUpload} className="hidden" />
 
         <div className="space-y-4">
-          <div className="text-4xl text-white">CSV</div>
+          <div className="text-4xl text-white">📊</div>
           <div>
-            <h3 className="text-lg font-medium text-white mb-2">Upload Employee Performance CSV</h3>
-            <p className="text-gray-400">Upload your CSV file to analyze employee competencies and performance</p>
+            <h3 className="text-lg font-medium text-white mb-2">Upload Data File</h3>
+            <p className="text-gray-400">Upload your CSV or Excel file to analyze employee competencies and performance</p>
           </div>
 
           <div className="flex justify-center space-x-4">
@@ -279,7 +341,7 @@ export default function FileUpload({ onDataLoaded }: FileUploadProps) {
               disabled={uploading}
               className="bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors font-medium btn-3d"
             >
-              {uploading ? "Processing..." : "Choose CSV File"}
+              {uploading ? "Uploading to Backend..." : "Choose File"}
             </button>
 
             <button
@@ -295,25 +357,18 @@ export default function FileUpload({ onDataLoaded }: FileUploadProps) {
       {error && (
         <div className="glass border-red-500/30 bg-red-500/10 rounded-lg p-4">
           <div className="flex items-center text-red-300">
-            <span className="mr-3">Error</span>
+            <span className="mr-3">❌ Error</span>
             <div>{error}</div>
           </div>
         </div>
       )}
 
       <div className="glass border-blue-500/30 bg-blue-500/10 rounded-lg p-4">
-        <h4 className="font-semibold text-blue-300 mb-2">Expected CSV Format</h4>
+        <h4 className="font-semibold text-blue-300 mb-2">Supported File Formats</h4>
         <div className="text-blue-200 text-sm space-y-1">
-          <p>
-            <strong>Columns:</strong> ID, Name, Department, Overall Score, Strengths, Strength Scores, Development
-            Areas, Development Scores
-          </p>
-          <p>
-            <strong>Example:</strong>
-          </p>
-          <code className="block bg-blue-500/20 p-2 rounded text-xs mt-2">
-            EMP001,John Doe,Engineering,85,Leadership;Communication,90;80,Time Management,65
-          </code>
+          <p><strong>CSV Files:</strong> Comma-separated values with headers</p>
+          <p><strong>Excel Files:</strong> .xlsx and .xls formats supported</p>
+          <p><strong>Expected Columns:</strong> ID, Name, Department, Overall Score, Strengths, Strength Scores, Development Areas, Development Scores</p>
         </div>
       </div>
     </div>

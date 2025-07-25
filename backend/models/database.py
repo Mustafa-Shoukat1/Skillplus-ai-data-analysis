@@ -22,6 +22,27 @@ class User(Base):
     # Relationships
     uploaded_files = relationship("UploadedFile", back_populates="user")
     analysis_results = relationship("AnalysisResult", back_populates="user")
+    ai_templates = relationship("AITemplate", back_populates="user")
+
+class AITemplate(Base):
+    __tablename__ = "ai_templates"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    title = Column(String, nullable=False)
+    description = Column(Text, nullable=True)
+    prompt = Column(Text, nullable=False)
+    category = Column(String, nullable=True)  # e.g., "visualization", "analysis", "custom"
+    icon = Column(String, nullable=True)  # Store icon name or class
+    color_scheme = Column(String, nullable=True)  # Store color gradient class
+    is_default = Column(Boolean, default=False)  # System default templates
+    is_active = Column(Boolean, default=True)
+    usage_count = Column(Integer, default=0)  # Track how often it's used
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    
+    # Relationships
+    user = relationship("User", back_populates="ai_templates")
 
 class UploadedFile(Base):
     __tablename__ = "uploaded_files"
@@ -48,7 +69,8 @@ class UploadedFile(Base):
 class AnalysisResult(Base):
     __tablename__ = "analysis_results"
     
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(Integer, primary_key=True, index=True)  # Keep for database relationships
+    analysis_id = Column(String, unique=True, index=True, nullable=False)  # Main identifier
     user_query = Column(Text, nullable=False)
     success = Column(Boolean, nullable=False, default=False)
     
@@ -80,6 +102,12 @@ class AnalysisResult(Base):
     # Visualization HTML content
     visualization_html = Column(Text, nullable=True)
     
+    # NEW: Visibility toggle for graphs/visualizations
+    is_visible = Column(Boolean, default=True, nullable=False)  # Controls if visualization is shown in viewer dashboard
+    
+    # Template information
+    template_id = Column(Integer, ForeignKey("ai_templates.id"), nullable=True)
+    
     # Metadata
     retry_count = Column(Integer, default=0)
     processing_time = Column(Float, nullable=True)  # in seconds
@@ -96,6 +124,7 @@ class AnalysisResult(Base):
     # Relationships
     user = relationship("User", back_populates="analysis_results")
     file = relationship("UploadedFile", back_populates="analysis_results")
+    template = relationship("AITemplate")
 
 class APIUsage(Base):
     __tablename__ = "api_usage"
@@ -109,5 +138,4 @@ class APIUsage(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     
     # Relationship
-    user = relationship("User")
     user = relationship("User")

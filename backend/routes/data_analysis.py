@@ -2,12 +2,13 @@ import asyncio
 import os
 import uuid
 from typing import Dict, Any, List
-from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks, Request
+from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from models.database import UploadedFile, User, AnalysisResult
-from models.data_analysis import DataAnalysisRequest, ChartGenerationResponse
+from models.data_analysis import DataAnalysisRequest, ChartGenerationResponse, AnalysisVisibilityUpdate, AnalysisListResponse
 from services.auth import get_current_active_user
 from services.data_analysis import DataAnalysisService
 from core.database import get_async_db, get_async_db_dependency
@@ -18,6 +19,20 @@ router = APIRouter(prefix="/analysis", tags=["Data Analysis"])
 # In-memory storage for background task results
 # In production, use Redis or similar
 analysis_results: Dict[str, Any] = {}
+
+# Add manual CORS handling for preflight requests
+@router.options("/{path:path}")
+async def options_handler(request: Request):
+    """Handle OPTIONS requests for CORS preflight"""
+    return JSONResponse(
+        content={},
+        headers={
+            "Access-Control-Allow-Origin": "http://localhost:3000",
+            "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+            "Access-Control-Allow-Headers": "Content-Type, Authorization",
+            "Access-Control-Allow-Credentials": "true"
+        }
+    )
 
 @router.post("/analyze/{file_id}", response_model=Dict[str, str])
 async def start_analysis(
@@ -102,7 +117,19 @@ async def get_analysis_status(task_id: str):
         status_info = analysis_results[task_id]
         logger.debug(f"Task status: {status_info.get('status', 'unknown')}")
         
-        return status_info
+        # Enhanced status response with better completion indication
+        response = {
+            "task_id": task_id,
+            "status": status_info.get("status", "unknown"),
+            "progress": status_info.get("progress", 0),
+            "completed": status_info.get("status") == "completed",
+            "success": status_info.get("success", False),
+            "error": status_info.get("error"),
+            "analysis_id": status_info.get("analysis_id")
+        }
+        
+        logger.debug(f"Returning status response: {response}")
+        return response
         
     except HTTPException:
         raise
@@ -117,7 +144,7 @@ async def get_analysis_status(task_id: str):
 async def get_analysis_result(task_id: str):
     """Get completed analysis result"""
     
-    logger.debug(f"Fetching result for task_id: {task_id}")
+    logger.info(f"Fetching result for task_id: {task_id}")
     
     if task_id not in analysis_results:
         logger.warning(f"Task not found in analysis_results: {task_id}")
@@ -125,7 +152,7 @@ async def get_analysis_result(task_id: str):
         raise HTTPException(status_code=404, detail="Task not found")
     
     result = analysis_results[task_id]
-    logger.debug(f"Task result status: {result.get('status')}")
+    logger.info(f"Task result status: {result.get('status')}")
     
     if result["status"] == "processing":
         logger.debug(f"Task {task_id} still processing, progress: {result.get('progress', 0)}")
@@ -147,12 +174,11 @@ async def get_analysis_result(task_id: str):
             detail="Analysis data missing"
         )
     
+    logger.info(f"Processing analysis result for task {task_id}")
     logger.debug(f"Analysis data type: {type(analysis_data)}")
-    logger.debug(f"Analysis data keys: {analysis_data.keys() if isinstance(analysis_data, dict) else 'Not a dict'}")
     
     # Convert Pydantic objects to dictionaries for safe access
     def safe_extract(obj):
-        """Safely extract data from Pydantic objects or dicts"""
         if hasattr(obj, 'model_dump'):
             return obj.model_dump()
         elif isinstance(obj, dict):
@@ -166,9 +192,7 @@ async def get_analysis_result(task_id: str):
     execution_dict = safe_extract(analysis_data.get("execution"))
     final_results_dict = safe_extract(analysis_data.get("final_results"))
     
-    logger.debug(f"Extracted dicts - classification: {bool(classification_dict)}, analysis: {bool(analysis_dict)}, execution: {bool(execution_dict)}, final_results: {bool(final_results_dict)}")
-    
-    # Check what query type we're dealing with
+    # Check query type
     query_type = classification_dict.get("query_type", "unknown")
     if hasattr(query_type, 'value'):
         query_type_str = query_type.value
@@ -177,13 +201,17 @@ async def get_analysis_result(task_id: str):
     
     logger.info(f"Processing result for query type: {query_type_str}")
     
-    # Extract summary from final results
-    summary = final_results_dict.get("summary") if final_results_dict else None
+    # Extract summary - try multiple sources
+    summary = (
+        final_results_dict.get("summary") or 
+        final_results_dict.get("answer") or
+        analysis_dict.get("query_understanding") or
+        "Analysis completed successfully"
+    )
     
-    # Determine success status from multiple sources
+    # Determine success status
     analysis_success = False
     if isinstance(analysis_data, dict):
-        # Check various success indicators
         final_results_success = final_results_dict.get("success", False) if final_results_dict else False
         execution_success = execution_dict.get("success", False) if execution_dict else False
         has_code = bool(analysis_data.get("generated_code"))
@@ -192,102 +220,159 @@ async def get_analysis_result(task_id: str):
             analysis_data.get("success", False) or 
             final_results_success or
             execution_success or
-            has_code  # Consider successful if we have generated code
+            has_code
         )
     
-    logger.info(f"Returning analysis result for task {task_id}, success: {analysis_success}")
-    logger.debug(f"Success determination: main={analysis_data.get('success')}, final={final_results_success}, execution={execution_success}, has_code={bool(analysis_data.get('generated_code'))}")
+    logger.info(f"Analysis success determined: {analysis_success}")
     
-    # ENHANCED: Extract visualization HTML content with multiple fallback methods
+    # Get visualization HTML with enhanced fallback
     chart_html = None
     
-    # For visualization queries, try multiple methods to get HTML
     if query_type_str == "visualization":
         logger.info("Looking for visualization HTML content...")
         
-        # Method 1: Check if HTML is directly stored in analysis data
+        # Try multiple methods to get HTML
         chart_html = analysis_data.get("visualization_html")
-        if chart_html:
-            logger.info(f"Found HTML in analysis data: {len(chart_html)} characters")
         
-        # Method 2: Check database for saved visualization HTML
         if not chart_html and result.get("analysis_id"):
             try:
                 async with get_async_db() as db:
                     db_result = await db.execute(
-                        select(AnalysisResult).where(AnalysisResult.id == result["analysis_id"])
+                        select(AnalysisResult).where(AnalysisResult.analysis_id == result["analysis_id"])
                     )
                     analysis_record = db_result.scalar_one_or_none()
                     if analysis_record and analysis_record.visualization_html:
                         chart_html = analysis_record.visualization_html
-                        logger.info(f"Loaded HTML from database for analysis {result['analysis_id']}: {len(chart_html)} characters")
+                        logger.info(f"Loaded HTML from database: {len(chart_html)} characters")
             except Exception as e:
                 logger.warning(f"Could not load HTML from database: {e}")
         
-        # Method 3: Check if there are HTML files created
+        # Check for HTML files if still not found
         if not chart_html and execution_dict:
             file_paths = execution_dict.get("file_paths", [])
-            logger.debug(f"Checking file paths: {file_paths}")
             for file_path in file_paths:
-                if file_path.endswith('.html'):
+                if file_path.endswith('.html') and os.path.exists(file_path):
                     try:
                         with open(file_path, 'r', encoding='utf-8') as f:
                             chart_html = f.read()
-                        logger.info(f"Loaded HTML content from {file_path}: {len(chart_html)} characters")
+                        logger.info(f"Loaded HTML from file {file_path}: {len(chart_html)} characters")
                         break
                     except Exception as e:
                         logger.warning(f"Could not read HTML file {file_path}: {e}")
         
-        # Method 4: Check standard plots directory
+        # Check standard location
         if not chart_html:
             plots_dir = os.path.abspath('plots')
             html_file = os.path.join(plots_dir, 'visualization.html')
-            logger.debug(f"Checking standard location: {html_file}")
             if os.path.exists(html_file):
                 try:
                     with open(html_file, 'r', encoding='utf-8') as f:
                         chart_html = f.read()
-                    logger.info(f"Loaded HTML from standard location: {html_file}: {len(chart_html)} characters")
+                    logger.info(f"Loaded HTML from standard location: {len(chart_html)} characters")
                 except Exception as e:
                     logger.warning(f"Could not read HTML from standard location: {e}")
-            else:
-                logger.warning(f"No HTML file found at standard location: {html_file}")
     
-    # Log visualization status
     logger.info(f"Visualization HTML found: {bool(chart_html)}")
-    if chart_html:
-        logger.debug(f"HTML content length: {len(chart_html)}")
     
     # Build comprehensive response
     response = ChartGenerationResponse(
         success=analysis_success,
-        chart_base64=None,  # You can add base64 encoding for charts
+        chart_base64=None,
         chart_html=chart_html,
-        insights=[],  # Empty list since we removed key_insights
+        insights=[],
         generated_code=analysis_data.get("generated_code"),
         analysis_summary=summary,
         query_analysis=classification_dict if classification_dict else None,
         data_analysis=analysis_dict if analysis_dict else None,
         execution_result=execution_dict if execution_dict else None,
-        error_message=None if analysis_success else analysis_data.get("error", "Analysis completed but with issues")
+        error_message=None if analysis_success else analysis_data.get("error", "Analysis completed but with issues"),
+        analysis_id=result.get("analysis_id")
     )
     
-    # Log the response for debugging
-    logger.debug(f"Response for task {task_id}: success={response.success}, has_code={bool(response.generated_code)}, has_html={bool(response.chart_html)}")
+    logger.info(f"Returning result for task {task_id}: success={response.success}, has_code={bool(response.generated_code)}, has_html={bool(response.chart_html)}")
     
     return response
 
-@router.get("/history", response_model=List[Dict[str, Any]])
+@router.get("/history", response_model=List[AnalysisListResponse])
 async def get_analysis_history(
+    limit: int = 50,
+    offset: int = 0,
+    visible_only: bool = False,  # NEW: Filter for visible analyses only
+    db: AsyncSession = Depends(get_async_db_dependency)
+):
+    """Get analysis history with visibility filtering"""
+    
+    query = select(AnalysisResult).order_by(AnalysisResult.created_at.desc())
+    
+    # Filter by visibility if requested
+    if visible_only:
+        query = query.where(AnalysisResult.is_visible == True)
+    
+    query = query.limit(limit).offset(offset)
+    result = await db.execute(query)
+    results = result.scalars().all()
+    
+    return [
+        AnalysisListResponse(
+            analysis_id=result.analysis_id,
+            database_id=result.id,
+            user_query=result.user_query,
+            success=result.success,
+            query_type=result.query_type or "unknown",
+            processing_time=result.processing_time,
+            model_used=result.model_used,
+            created_at=result.created_at,
+            completed_at=result.completed_at,
+            visualization_created=result.visualization_created,
+            final_answer=result.final_answer,
+            summary=result.summary,
+            is_visible=result.is_visible,
+            template_name=result.template.title if result.template else None
+        )
+        for result in results
+    ]
+
+@router.patch("/visibility/{analysis_id}")
+async def toggle_analysis_visibility(
+    analysis_id: str,
+    visibility_update: AnalysisVisibilityUpdate,
+    db: AsyncSession = Depends(get_async_db_dependency)
+):
+    """Toggle visibility of an analysis result"""
+    
+    result = await db.execute(
+        select(AnalysisResult).where(AnalysisResult.analysis_id == analysis_id)
+    )
+    analysis = result.scalar_one_or_none()
+    
+    if not analysis:
+        raise HTTPException(status_code=404, detail="Analysis not found")
+    
+    # Update visibility
+    analysis.is_visible = visibility_update.is_visible
+    await db.commit()
+    await db.refresh(analysis)
+    
+    logger.info(f"Analysis {analysis_id} visibility updated to: {visibility_update.is_visible}")
+    
+    return {
+        "analysis_id": analysis_id,
+        "is_visible": analysis.is_visible,
+        "message": f"Analysis {'enabled' if analysis.is_visible else 'disabled'} successfully"
+    }
+
+@router.get("/visible", response_model=List[AnalysisListResponse])
+async def get_visible_analyses(
     limit: int = 50,
     offset: int = 0,
     db: AsyncSession = Depends(get_async_db_dependency)
 ):
-    """Get analysis history"""
+    """Get only visible analyses for viewer dashboard"""
     
-    # Get all analysis results (removed user restriction)
     result = await db.execute(
         select(AnalysisResult)
+        .where(AnalysisResult.is_visible == True)
+        .where(AnalysisResult.visualization_created == True)  # Only show analyses with visualizations
         .order_by(AnalysisResult.created_at.desc())
         .limit(limit)
         .offset(offset)
@@ -295,30 +380,34 @@ async def get_analysis_history(
     results = result.scalars().all()
     
     return [
-        {
-            "id": result.id,
-            "user_query": result.user_query,
-            "success": result.success,
-            "query_type": result.query_type,
-            "processing_time": result.processing_time,
-            "model_used": result.model_used,
-            "created_at": result.created_at,
-            "visualization_created": result.visualization_created,
-            "final_answer": result.final_answer,
-            "summary": result.summary
-        }
+        AnalysisListResponse(
+            analysis_id=result.analysis_id,
+            database_id=result.id,
+            user_query=result.user_query,
+            success=result.success,
+            query_type=result.query_type or "unknown",
+            processing_time=result.processing_time,
+            model_used=result.model_used,
+            created_at=result.created_at,
+            completed_at=result.completed_at,
+            visualization_created=result.visualization_created,
+            final_answer=result.final_answer,
+            summary=result.summary,
+            is_visible=result.is_visible,
+            template_name=result.template.title if result.template else None
+        )
         for result in results
     ]
 
 @router.get("/result/db/{analysis_id}")
 async def get_saved_analysis_result(
-    analysis_id: int,
+    analysis_id: str,  # Changed from int to str
     db: AsyncSession = Depends(get_async_db_dependency)
 ):
-    """Get analysis result from database"""
+    """Get analysis result from database by analysis_id"""
     
     result = await db.execute(
-        select(AnalysisResult).where(AnalysisResult.id == analysis_id)
+        select(AnalysisResult).where(AnalysisResult.analysis_id == analysis_id)  # Use analysis_id instead of id
     )
     analysis = result.scalar_one_or_none()
     
@@ -326,7 +415,8 @@ async def get_saved_analysis_result(
         raise HTTPException(status_code=404, detail="Analysis not found")
     
     return {
-        "id": analysis.id,
+        "analysis_id": analysis.analysis_id,  # Return analysis_id instead of id
+        "database_id": analysis.id,  # Include internal ID for reference if needed
         "user_query": analysis.user_query,
         "success": analysis.success,
         "classification": {
@@ -354,22 +444,23 @@ async def get_saved_analysis_result(
             "visualization_info": analysis.visualization_info
         },
         "generated_code": analysis.generated_code,
-        "visualization_html": analysis.visualization_html,  # Include HTML content
+        "visualization_html": analysis.visualization_html,
         "retry_count": analysis.retry_count,
         "processing_time": analysis.processing_time,
         "model_used": analysis.model_used,
-        "created_at": analysis.created_at
+        "created_at": analysis.created_at,
+        "completed_at": analysis.completed_at
     }
 
 @router.get("/visualization/{analysis_id}")
 async def get_visualization_html(
-    analysis_id: int,
+    analysis_id: str,  # Changed from int to str
     db: AsyncSession = Depends(get_async_db_dependency)
 ):
-    """Get visualization HTML content for rendering"""
+    """Get visualization HTML content for rendering by analysis_id"""
     
     result = await db.execute(
-        select(AnalysisResult).where(AnalysisResult.id == analysis_id)
+        select(AnalysisResult).where(AnalysisResult.analysis_id == analysis_id)  # Use analysis_id
     )
     analysis = result.scalar_one_or_none()
     
@@ -384,7 +475,7 @@ async def get_visualization_html(
 
 @router.get("/debug/tasks")
 async def debug_tasks():
-    """Debug endpoint to see all tasks (remove in production)"""
+    """Debug endpoint to see all tasks (enhanced with file info)"""
     return {
         "total_tasks": len(analysis_results),
         "tasks": {
@@ -394,6 +485,8 @@ async def debug_tasks():
                 "has_result": "result" in task_data,
                 "result_type": type(task_data.get("result")).__name__ if "result" in task_data else None,
                 "success": task_data.get("success"),
+                "analysis_id": task_data.get("analysis_id"),
+                "file_info": task_data.get("file_info", {}),
                 "keys": list(task_data.keys())
             }
             for task_id, task_data in analysis_results.items()

@@ -9,7 +9,7 @@ import time
 from core.config import settings
 from core.database import init_db
 from core.logger import logger
-from routes import auth, uploads, data_analysis
+from routes import auth, uploads, data_analysis, templates
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -36,13 +36,29 @@ app = FastAPI(
     redoc_url="/redoc"
 )
 
-# CORS middleware
+# CORS middleware - ENHANCED configuration
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Configure appropriately for production
+    allow_origins=[
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://localhost:3001",
+        "http://127.0.0.1:3001"
+    ],  # More specific origins for development
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=[
+        "Accept",
+        "Accept-Language",
+        "Content-Language",
+        "Content-Type",
+        "Authorization",
+        "X-Requested-With",
+        "Origin",
+        "Access-Control-Request-Method",
+        "Access-Control-Request-Headers"
+    ],
+    expose_headers=["*"]
 )
 
 # Security middleware
@@ -101,6 +117,7 @@ async def root():
 app.include_router(auth.router, prefix=settings.API_PREFIX)
 app.include_router(uploads.router, prefix=settings.API_PREFIX)
 app.include_router(data_analysis.router, prefix=settings.API_PREFIX)
+app.include_router(templates.router, prefix=settings.API_PREFIX)
 
 def main():
     import uvicorn

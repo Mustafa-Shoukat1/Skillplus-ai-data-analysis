@@ -4,10 +4,13 @@ import { useState } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Upload, Bot, Users, FileText, Brain, CheckCircle } from "lucide-react"
+import { Upload, Bot, Users, FileText, Brain, CheckCircle, TrendingUp, Eye, EyeOff, ToggleLeft, ToggleRight } from "lucide-react"
+import { Button } from "@/components/ui/button"
 import FileUpload from "./file-upload"
 import UserManagement from "./user-management"
 import AIAnalysisGenerator from "./ai-analysis-generator"
+import VisualizationLoader from "./visualization-loader"
+import { toggleAnalysisVisibility } from "@/lib/api"
 
 interface AdminDashboardProps {
   user: any
@@ -24,13 +27,31 @@ export default function AdminDashboard({
   user,
   csvData,
   onDataLoaded,
-  analyses,
+  analyses: initialAnalyses,
   onAnalysisGenerated,
   users,
   onAddUser,
   onDeleteUser,
 }: AdminDashboardProps) {
   const [activeTab, setActiveTab] = useState("upload")
+  const [uploadedFileId, setUploadedFileId] = useState<string>("")
+  const [analyses, setAnalyses] = useState<any[]>(initialAnalyses)
+
+  // Load file ID from localStorage on component mount
+  useState(() => {
+    const savedFileId = localStorage.getItem("uploadedFileId")
+    if (savedFileId) {
+      setUploadedFileId(savedFileId)
+    }
+  })
+
+  const handleDataLoaded = (data: any[], departments: string[], analytics: any, fileId?: string) => {
+    onDataLoaded(data, departments, analytics)
+    if (fileId) {
+      setUploadedFileId(fileId)
+      localStorage.setItem("uploadedFileId", fileId)
+    }
+  }
 
   const getTabIcon = (tabId: string) => {
     switch (tabId) {
@@ -59,6 +80,84 @@ export default function AdminDashboard({
   }
 
   const stats = getAnalysisStats()
+
+  // Enhanced helper function for downloading charts with better error handling
+  const handleDownloadChart = (analysis: any) => {
+    let htmlContent = analysis.visualizationHtml
+
+    // Get consistent analysis ID for download filename
+    const analysisId = analysis.analysis_id || analysis.analysisId || analysis.id?.toString() || "unknown"
+    const displayId = analysisId.includes('analysis_') ? analysisId.substr(-8) : analysisId
+
+    // If stored separately, try to get from localStorage
+    if (htmlContent === "stored_separately") {
+      const vizKey = `viz_${analysis.visualizationId || analysis.analysisId}`
+      htmlContent = localStorage.getItem(vizKey)
+      
+      if (!htmlContent) {
+        // Try to fetch from backend
+        fetch(`http://localhost:8000/api/analysis/visualization/${analysisId}`)
+          .then(response => response.text())
+          .then(content => {
+            const blob = new Blob([content], { type: 'text/html' })
+            const url = URL.createObjectURL(blob)
+            const a = document.createElement('a')
+            a.href = url
+            a.download = `${analysis.title.replace(/\s+/g, '_')}_${displayId}.html`
+            a.click()
+            URL.revokeObjectURL(url)
+          })
+          .catch(error => {
+            console.error("Failed to download from backend:", error)
+            alert("Visualization download failed. The file may be too large or temporarily unavailable.")
+          })
+        return
+      }
+    }
+
+    if (htmlContent && htmlContent !== "stored_separately") {
+      try {
+        const blob = new Blob([htmlContent], { type: 'text/html' })
+        const url = URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = url
+        a.download = `${analysis.title.replace(/\s+/g, '_')}_${displayId}.html`
+        a.click()
+        URL.revokeObjectURL(url)
+      } catch (downloadError) {
+        console.error("Download error:", downloadError)
+        alert("Download failed due to file size limitations.")
+      }
+    } else {
+      alert("Visualization not available for download. It may have been too large to store locally.")
+    }
+  }
+
+  // NEW: Handle visibility toggle
+  const handleToggleVisibility = async (analysisId: string, newVisibility: boolean) => {
+    try {
+      const response = await toggleAnalysisVisibility(analysisId, newVisibility)
+      
+      if (response.success) {
+        // Update local state
+        setAnalyses(prev => prev.map(analysis => {
+          const currentId = analysis.analysis_id || analysis.analysisId || analysis.id?.toString()
+          if (currentId === analysisId) {
+            return { ...analysis, is_visible: newVisibility }
+          }
+          return analysis
+        }))
+        
+        console.log(`Analysis ${analysisId} visibility updated to: ${newVisibility}`)
+      } else {
+        console.error('Failed to update visibility:', response.error)
+        alert('Failed to update visibility. Please try again.')
+      }
+    } catch (error) {
+      console.error('Error updating visibility:', error)
+      alert('Error updating visibility. Please try again.')
+    }
+  }
 
   return (
     <div className="min-h-screen relative overflow-hidden">
@@ -156,11 +255,20 @@ export default function AdminDashboard({
               <CardHeader>
                 <CardTitle className="text-white flex items-center space-x-2">
                   <Upload className="h-5 w-5" />
-                  <span>CSV Data Management</span>
+                  <span>File Upload & Management</span>
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <FileUpload onDataLoaded={onDataLoaded} />
+                <FileUpload onDataLoaded={handleDataLoaded} />
+
+                {/* Display file ID info */}
+                {uploadedFileId && (
+                  <div className="mt-4 p-3 bg-green-500/10 rounded-lg border border-green-500/20">
+                    <p className="text-green-300 text-sm">
+                      ✅ File uploaded successfully (ID: {uploadedFileId.substring(0, 8)}...)
+                    </p>
+                  </div>
+                )}
 
                 {csvData.length > 0 && (
                   <div className="mt-6">
@@ -207,7 +315,12 @@ export default function AdminDashboard({
 
           {/* AI Analysis Tab */}
           <TabsContent value="ai-analysis" className="space-y-6">
-            <AIAnalysisGenerator csvData={csvData} onAnalysisGenerated={onAnalysisGenerated} analyses={analyses} />
+            <AIAnalysisGenerator 
+              csvData={csvData} 
+              onAnalysisGenerated={onAnalysisGenerated} 
+              analyses={analyses}
+              uploadedFileId={uploadedFileId}
+            />
           </TabsContent>
 
           {/* User Management Tab */}
@@ -215,7 +328,7 @@ export default function AdminDashboard({
             <UserManagement currentUser={user} users={users} onAddUser={onAddUser} onDeleteUser={onDeleteUser} />
           </TabsContent>
 
-          {/* Reports Tab */}
+          {/* Reports Tab - ENHANCED with visibility toggle */}
           <TabsContent value="reports" className="space-y-6">
             <Card className="glass border-white/20">
               <CardHeader>
@@ -223,6 +336,7 @@ export default function AdminDashboard({
                   <FileText className="h-5 w-5" />
                   <span>Analysis Reports</span>
                 </CardTitle>
+                <p className="text-gray-400">Manage analysis visibility for viewer dashboard</p>
               </CardHeader>
               <CardContent>
                 {analyses.length === 0 ? (
@@ -232,33 +346,132 @@ export default function AdminDashboard({
                   </div>
                 ) : (
                   <div className="space-y-4">
-                    {analyses.map((analysis, index) => (
-                      <div key={index} className="glass rounded-lg p-4 border-white/10">
-                        <div className="flex justify-between items-start mb-3">
-                          <div>
-                            <h3 className="text-lg font-semibold text-white">{analysis.title}</h3>
-                            <p className="text-gray-400 text-sm">{analysis.prompt}</p>
+                    {analyses.map((analysis, index) => {
+                      // Get consistent analysis ID
+                      const analysisId = analysis.analysis_id || analysis.analysisId || analysis.id?.toString() || `temp_${index}`
+                      const displayId = analysisId.includes('analysis_') ? analysisId.substr(-8) : analysisId
+                      const isVisible = analysis.is_visible !== false // Default to true if not set
+                      
+                      return (
+                        <div key={analysisId} className="glass rounded-lg p-4 border-white/10">
+                          <div className="flex justify-between items-start mb-3">
+                            <div className="flex-1">
+                              <div className="flex items-center space-x-3 mb-2">
+                                <h3 className="text-lg font-semibold text-white">{analysis.title}</h3>
+                                <Badge className="bg-blue-500/20 text-blue-300 border-blue-500/30 font-mono text-xs">
+                                  ID: {displayId}
+                                </Badge>
+                                {analysis.templateId && (
+                                  <Badge className="bg-purple-500/20 text-purple-300 border-purple-500/30 text-xs">
+                                    Template: {analysis.templateName || analysis.templateId}
+                                  </Badge>
+                                )}
+                                {/* NEW: Visibility Toggle */}
+                                <div className="flex items-center space-x-2">
+                                  <Button
+                                    size="sm"
+                                    variant="ghost"
+                                    onClick={() => handleToggleVisibility(analysisId, !isVisible)}
+                                    className={`flex items-center space-x-1 ${isVisible ? 'text-green-400 hover:text-green-300' : 'text-gray-500 hover:text-gray-400'}`}
+                                  >
+                                    {isVisible ? <ToggleRight className="h-4 w-4" /> : <ToggleLeft className="h-4 w-4" />}
+                                    <span className="text-xs">{isVisible ? 'Visible' : 'Hidden'}</span>
+                                  </Button>
+                                </div>
+                              </div>
+                              <p className="text-gray-400 text-sm">{analysis.prompt}</p>
+                              
+                              {/* Analysis Metadata */}
+                              <div className="flex items-center space-x-4 mt-2 text-xs text-gray-500">
+                                <span>Type: {analysis.queryType || analysis.type}</span>
+                                <span>Data Points: {analysis.dataPoints}</span>
+                                {analysis.hasVisualization && (
+                                  <span className="text-purple-400">📊 Has Visualization</span>
+                                )}
+                                {analysis.executionSuccess && (
+                                  <span className="text-green-400">✅ Executed Successfully</span>
+                                )}
+                                {/* Visibility Status */}
+                                <span className={`flex items-center space-x-1 ${isVisible ? 'text-green-400' : 'text-red-400'}`}>
+                                  {isVisible ? <Eye className="h-3 w-3" /> : <EyeOff className="h-3 w-3" />}
+                                  <span>{isVisible ? 'Public' : 'Private'}</span>
+                                </span>
+                              </div>
+                            </div>
+                            <div className="flex items-center space-x-2">
+                              <Badge className="bg-green-500/20 text-green-300 border-green-500/30">
+                                <CheckCircle className="h-3 w-3 mr-1" />
+                                Generated
+                              </Badge>
+                              <span className="text-xs text-gray-400">{analysis.timestamp}</span>
+                            </div>
                           </div>
-                          <div className="flex items-center space-x-2">
-                            <Badge className="bg-green-500/20 text-green-300 border-green-500/30">
-                              <CheckCircle className="h-3 w-3 mr-1" />
-                              Generated
-                            </Badge>
-                            <span className="text-xs text-gray-400">{analysis.timestamp}</span>
+
+                          {/* Only show content if visible or in admin view */}
+                          <div className={`${!isVisible ? 'opacity-50' : ''}`}>
+                            {/* Analysis Results */}
+                            {analysis.insights && (
+                              <div className="mt-3 p-3 bg-blue-500/10 rounded-lg border border-blue-500/20">
+                                <h4 className="font-semibold text-blue-300 mb-1 flex items-center">
+                                  <Brain className="h-4 w-4 mr-1" />
+                                  AI Insights
+                                </h4>
+                                <p className="text-blue-200 text-sm">{analysis.insights}</p>
+                              </div>
+                            )}
+
+                            {/* Show visualization if available */}
+                            {analysis.visualizationHtml && (
+                              <div className="mt-3 p-3 bg-purple-500/10 rounded-lg border border-purple-500/20">
+                                <h4 className="font-semibold text-purple-300 mb-2 flex items-center">
+                                  <TrendingUp className="h-4 w-4 mr-1" />
+                                  Visualization
+                                  {!isVisible && (
+                                    <Badge className="ml-2 bg-red-500/20 text-red-300 border-red-500/30 text-xs">
+                                      Hidden from Viewers
+                                    </Badge>
+                                  )}
+                                </h4>
+                                <div className="bg-white rounded-lg p-2 mb-2">
+                                  {analysis.visualizationHtml === "stored_separately" ? (
+                                    <VisualizationLoader analysisId={analysis.visualizationId || analysis.analysisId} />
+                                  ) : (
+                                    <iframe
+                                      srcDoc={analysis.visualizationHtml}
+                                      className="w-full h-64 border-0 rounded"
+                                      sandbox="allow-scripts allow-same-origin"
+                                      title={`Visualization for ${analysis.title}`}
+                                    />
+                                  )}
+                                </div>
+                                <Button
+                                  size="sm"
+                                  onClick={() => handleDownloadChart(analysis)}
+                                  className="bg-purple-600 hover:bg-purple-700 text-white"
+                                >
+                                  <Eye className="h-3 w-3 mr-1" />
+                                  Download Chart
+                                </Button>
+                              </div>
+                            )}
+
+                            {/* Generated Code Preview */}
+                            {analysis.generatedCode && (
+                              <details className="mt-3">
+                                <summary className="cursor-pointer text-gray-300 hover:text-white">
+                                  View Generated Code
+                                </summary>
+                                <div className="mt-2 p-3 bg-gray-500/10 rounded-lg border border-gray-500/20">
+                                  <pre className="text-gray-300 text-xs overflow-x-auto max-h-32">
+                                    <code>{analysis.generatedCode}</code>
+                                  </pre>
+                                </div>
+                              </details>
+                            )}
                           </div>
                         </div>
-
-                        {analysis.insights && (
-                          <div className="mt-3 p-3 bg-blue-500/10 rounded-lg border border-blue-500/20">
-                            <h4 className="font-semibold text-blue-300 mb-1 flex items-center">
-                              <Brain className="h-4 w-4 mr-1" />
-                              AI Insights
-                            </h4>
-                            <p className="text-blue-200 text-sm">{analysis.insights}</p>
-                          </div>
-                        )}
-                      </div>
-                    ))}
+                      )
+                    })}
                   </div>
                 )}
               </CardContent>

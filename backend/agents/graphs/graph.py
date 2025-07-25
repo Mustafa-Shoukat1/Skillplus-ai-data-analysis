@@ -1,6 +1,7 @@
 import logging
 import json
 import os
+import time
 from langgraph.graph import StateGraph, END
 from langchain_anthropic.chat_models import ChatAnthropic
 
@@ -11,7 +12,7 @@ from ..nodes.nodes import (
 )
 from ..edges.edges import classify_query_edge, code_review_edge, execution_retry_edge
 from core.config import settings
-
+from core.logger import logger, log_exception
 class DataAnalysisWorkflow:
     """Optimized data analysis workflow with structured output and reliable error handling"""
     
@@ -110,28 +111,48 @@ class DataAnalysisWorkflow:
         return builder.compile()
     
     def run_analysis(self, df, user_query: str) -> dict:
-        """Run the complete analysis workflow with enhanced error handling"""
-        self.logger.info(f"🎯 Starting optimized analysis for query: '{user_query}'")
+        """Run the complete analysis workflow with enhanced error handling and logging"""
+        self.logger.info(f"🎯 Starting analysis workflow for query: '{user_query}'")
         self.logger.info(f"📊 Dataset shape: {df.shape}")
+        self.logger.debug(f"📊 Dataset columns: {df.columns.tolist()}")
+        
+        # Validate inputs
+        if not user_query or len(user_query.strip()) < 5:
+            error_msg = f"Invalid query: '{user_query}' - too short or empty"
+            self.logger.error(error_msg)
+            return self._create_error_json_output(error_msg, user_query)
+        
+        if df.empty:
+            error_msg = "Empty dataframe provided"
+            self.logger.error(error_msg)
+            return self._create_error_json_output(error_msg, user_query)
         
         # Create initial state with validation
         try:
             initial_state = AnalysisState(
                 user_query=user_query,
                 df=df,
-                max_retries=3  # Allow more retries for reliability
+                max_retries=3
             )
             
-            self.logger.debug("Initial state created successfully")
+            self.logger.info("✅ Initial state created successfully")
+            self.logger.debug(f"Initial state - query: '{initial_state.user_query}', df_shape: {initial_state.df.shape}")
             
         except Exception as e:
-            self.logger.error(f"Failed to create initial state: {e}")
-            return self._create_error_json_output(f"State creation failed: {str(e)}", user_query)
+            error_msg = f"Failed to create initial state: {str(e)}"
+            self.logger.error(error_msg)
+            log_exception(self.logger, "Initial state creation failed")
+            return self._create_error_json_output(error_msg, user_query)
         
         try:
-            # Execute the workflow
-            self.logger.debug("Starting workflow execution...")
+            # Execute the workflow with detailed logging
+            self.logger.info("🚀 Starting workflow execution...")
+            start_time = time.time()
+            
             result = self.graph.invoke(initial_state)
+            
+            execution_time = time.time() - start_time
+            self.logger.info(f"⏱️ Workflow execution completed in {execution_time:.2f} seconds")
             
             # Validate and process result
             processed_result = self._process_workflow_result(result, user_query)
@@ -140,8 +161,10 @@ class DataAnalysisWorkflow:
             return processed_result
             
         except Exception as e:
-            self.logger.error(f"Workflow execution failed: {e}")
-            return self._create_error_json_output(str(e), user_query)
+            error_msg = f"Workflow execution failed: {str(e)}"
+            self.logger.error(error_msg)
+            log_exception(self.logger, "Workflow execution failed")
+            return self._create_error_json_output(error_msg, user_query)
     
     def _process_workflow_result(self, result, user_query: str) -> dict:
         """Process and structure the workflow result with enhanced data preservation"""
@@ -264,16 +287,66 @@ class DataAnalysisWorkflow:
 # Convenience function with enhanced error handling
 def run_analysis(df, user_query: str, model_name: str = 'claude-3-opus-20240229') -> dict:
     """Run optimized analysis with structured output and enhanced reliability"""
+    logger = logging.getLogger(__name__)
+    
     try:
+        # Validate inputs before creating workflow
+        if not user_query or len(user_query.strip()) < 5:
+            logger.error(f"Invalid query provided: '{user_query}'")
+            return {
+                "success": False,
+                "user_query": user_query,
+                "error": "Query is too short or empty",
+                "classification": None,
+                "analysis": None,
+                "review": None,
+                "execution": None,
+                "final_results": None,
+                "generated_code": None,
+                "retry_count": 0,
+                "workflow_completed": False
+            }
+        
+        if df is None or df.empty:
+            logger.error("Empty or None dataframe provided")
+            return {
+                "success": False,
+                "user_query": user_query,
+                "error": "No data provided for analysis",
+                "classification": None,
+                "analysis": None,
+                "review": None,
+                "execution": None,
+                "final_results": None,
+                "generated_code": None,
+                "retry_count": 0,
+                "workflow_completed": False
+            }
+        
+        # Log input details
+        logger.info(f"Creating workflow with model: {model_name}")
+        logger.info(f"Query to analyze: '{user_query}'")
+        logger.info(f"Dataframe shape: {df.shape}")
+        logger.debug(f"Dataframe columns: {df.columns.tolist()}")
+        logger.debug(f"Sample data:\n{df.head(2)}")
+        
+        # Create workflow
         workflow = DataAnalysisWorkflow(model_name=model_name)
-        return workflow.run_analysis(df, user_query)
+        logger.info("✅ Workflow created successfully")
+        
+        # Run analysis
+        result = workflow.run_analysis(df, user_query)
+        logger.info("✅ Analysis execution completed")
+        
+        return result
+        
     except Exception as e:
-        logger = logging.getLogger(__name__)
         logger.error(f"Analysis execution failed: {e}")
+        log_exception(logger, "run_analysis function failed")
         return {
             "success": False,
             "user_query": user_query,
-            "error": f"Workflow initialization failed: {str(e)}",
+            "error": f"Workflow initialization or execution failed: {str(e)}",
             "classification": None,
             "analysis": None,
             "review": None,

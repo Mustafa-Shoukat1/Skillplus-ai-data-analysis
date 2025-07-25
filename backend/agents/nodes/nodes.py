@@ -13,7 +13,7 @@ from ..prompts.prompts import (
     PROMPT_VISUALIZATION_CODE_GENERATION, PROMPT_CODE_REVIEW,
     PROMPT_CODE_REWRITE, PROMPT_FINAL_RESULTS
 )
-
+from core.logger import logger, log_exception
 class QueryClassificationNode(StructuredChainNode):
     """Node 1: Understanding & Classify Query with Structured Output"""
     
@@ -362,7 +362,7 @@ except Exception as e:
         })
 
 class CodeExecutionNode(BaseNode):
-    """Node 5: Execute Python Code with proper general/visualization distinction"""
+    """Node 5: Execute Python Code with proper dataframe injection"""
     
     def __init__(self):
         super().__init__("CodeExecution")
@@ -383,8 +383,12 @@ class CodeExecutionNode(BaseNode):
         )
         
         try:
-            # Prepare code for execution
+            # Prepare code for execution with actual dataframe
             full_code = self._prepare_code_for_execution(state.df, state.current_code, is_visualization_query)
+            
+            # Log the prepared code for debugging
+            logger.debug(f"Executing code for {'visualization' if is_visualization_query else 'general'} query")
+            logger.debug(f"Code length: {len(full_code)} characters")
             
             # Execute code
             output = self.py_tool.invoke(full_code)
@@ -423,11 +427,10 @@ class CodeExecutionNode(BaseNode):
             return state.model_copy(update={"execution_result": result})
     
     def _prepare_code_for_execution(self, df, code: str, is_visualization: bool = False) -> str:
-        """Prepare code with necessary setup, conditionally including visualization imports"""
-        df_dict = df.to_dict('records')
+        """Prepare code with the actual dataframe data - NO FILE LOADING"""
         
         if is_visualization:
-            # Full setup for visualization queries
+            # Full setup for visualization queries - but with dataframe data directly
             setup_code = f"""
 import pandas as pd
 import numpy as np
@@ -438,10 +441,17 @@ import warnings
 warnings.filterwarnings('ignore')
 
 # Create plots directory
-os.makedirs('plots', exist_ok=True)
+plots_dir = os.path.abspath('plots')
+os.makedirs(plots_dir, exist_ok=True)
 
-# Load the dataframe
-df = pd.DataFrame({df_dict})
+# Load the dataframe from provided data (NOT from file)
+df_data = {df.to_dict('records')}
+df = pd.DataFrame(df_data)
+
+print(f"Dataframe loaded successfully. Shape: {{df.shape}}")
+print(f"Columns: {{df.columns.tolist()}}")
+print(f"Sample data:")
+print(df.head(3))
 """
         else:
             # Minimal setup for general queries - NO VISUALIZATION IMPORTS
@@ -451,11 +461,36 @@ import numpy as np
 import warnings
 warnings.filterwarnings('ignore')
 
-# Load the dataframe
-df = pd.DataFrame({df_dict})
+# Load the dataframe from provided data (NOT from file)
+df_data = {df.to_dict('records')}
+df = pd.DataFrame(df_data)
+
+print(f"Dataframe loaded successfully. Shape: {{df.shape}}")
+print(f"Columns: {{df.columns.tolist()}}")
 """
         
-        return setup_code + "\n" + code
+        # Remove any file loading code from the generated code
+        cleaned_code = self._remove_file_loading_code(code)
+        
+        return setup_code + "\n" + cleaned_code
+    
+    def _remove_file_loading_code(self, code: str) -> str:
+        """Remove file loading statements from generated code"""
+        lines = code.split('\n')
+        cleaned_lines = []
+        
+        for line in lines:
+            # Skip lines that try to load files
+            if any(pattern in line.lower() for pattern in [
+                'pd.read_csv', 'pd.read_excel', 'pd.read_', 
+                'read_csv', 'read_excel', '.csv', '.xlsx',
+                'df = pd.read', 'df=pd.read'
+            ]):
+                self.logger.debug(f"Removing file loading line: {line.strip()}")
+                continue
+            cleaned_lines.append(line)
+        
+        return '\n'.join(cleaned_lines)
     
     def _check_visualization_created(self, code: str) -> bool:
         """Check if visualization was created - only for visualization queries"""

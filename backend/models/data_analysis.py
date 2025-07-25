@@ -1,3 +1,4 @@
+from datetime import datetime
 from enum import Enum
 from typing import List, Dict, Any, Optional, Literal
 from pydantic import BaseModel, Field
@@ -104,28 +105,29 @@ class ChartGenerationResponse(BaseModel):
     data_analysis: Optional[Dict[str, Any]] = None
     execution_result: Optional[Dict[str, Any]] = None
     error_message: Optional[str] = None
+    analysis_id: Optional[str] = None
+    is_visible: Optional[bool] = True  # NEW: Visibility toggle
 
-class DataPreviewResponse(BaseModel):
+class AnalysisVisibilityUpdate(BaseModel):
+    """Model for updating analysis visibility"""
+    is_visible: bool
+
+class AnalysisListResponse(BaseModel):
+    """Enhanced analysis list response with visibility info"""
+    analysis_id: str
+    database_id: int
+    user_query: str
     success: bool
-    data_preview: Optional[Dict[str, Any]] = None
-    columns: Optional[List[str]] = None
-    shape: Optional[tuple] = None
-    data_types: Optional[Dict[str, str]] = None
-    error_message: Optional[str] = None
-
-class FileUploadResponse(BaseModel):
-    success: bool
-    filename: str
-    file_id: str  # Changed from file_path
-    file_type: str
-    message: str
-    sheets: List[str] = []  # List of sheet names
-    total_sheets: int = 1
-    summary: Dict[str, Any] = {}
-
-class MultiSheetAnalysisRequest(BaseModel):
-    prompt: str
-    target_sheets: Optional[List[str]] = None  # Specific sheets to analyze
+    query_type: str
+    processing_time: Optional[float]
+    model_used: Optional[str]
+    created_at: datetime
+    completed_at: Optional[datetime]
+    visualization_created: bool
+    final_answer: Optional[str]
+    summary: Optional[str]
+    is_visible: bool  # NEW: Visibility status
+    template_name: Optional[str] = None
     combine_sheets: bool = False  # Whether to combine multiple sheets
     model: Optional[str] = "claude-3-opus-20240229"
 
@@ -136,3 +138,23 @@ class AnalysisCapabilitiesResponse(BaseModel):
     available_visualizations: List[str] = []
     data_quality_score: float = 0.0
     data_quality_score: float = 0.0
+
+class FileUploadResponse(BaseModel):
+    """Response model for file upload"""
+    success: bool
+    filename: str
+    file_id: str
+    file_type: str
+    message: str
+    sheets: List[str] = []
+    total_sheets: int = 1
+    summary: Dict[str, Any] = {}
+
+class DataPreviewResponse(BaseModel):
+    """Response model for file preview"""
+    success: bool
+    data_preview: Optional[Dict[str, Any]] = None
+    columns: List[str] = []
+    shape: Optional[tuple] = None
+    data_types: Dict[str, str] = {}
+    error_message: Optional[str] = None
