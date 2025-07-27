@@ -3,6 +3,8 @@
 import type React from "react"
 import { useState, useRef } from "react"
 import { uploadFile } from "@/lib/api"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 
 interface FileUploadProps {
   onDataLoaded: (data: any[], departments: string[], analytics: any, fileId?: string) => void
@@ -11,6 +13,8 @@ interface FileUploadProps {
 export default function FileUpload({ onDataLoaded }: FileUploadProps) {
   const [uploading, setUploading] = useState(false)
   const [error, setError] = useState("")
+  const [uploadedFileData, setUploadedFileData] = useState<any>(null)
+  const [showPreview, setShowPreview] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const parseCSVLine = (line: string) => {
@@ -131,7 +135,7 @@ export default function FileUpload({ onDataLoaded }: FileUploadProps) {
     const file = event.target.files?.[0]
     if (!file) return
 
-    // Check file type
+    // Check file type - Enhanced to support Excel
     const allowedTypes = ['.csv', '.xlsx', '.xls']
     const fileExtension = '.' + file.name.split('.').pop()?.toLowerCase()
     
@@ -142,6 +146,7 @@ export default function FileUpload({ onDataLoaded }: FileUploadProps) {
 
     setUploading(true)
     setError("")
+    setShowPreview(false)
 
     try {
       console.log("Starting file upload to backend...")
@@ -156,7 +161,7 @@ export default function FileUpload({ onDataLoaded }: FileUploadProps) {
       console.log("Backend upload successful:", uploadResponse.data)
       const uploadData = uploadResponse.data
 
-      // For CSV files, ALSO process locally for immediate display
+      // Handle different file types
       if (file.name.toLowerCase().endsWith('.csv')) {
         console.log("Processing CSV locally for immediate display...")
         
@@ -183,8 +188,16 @@ export default function FileUpload({ onDataLoaded }: FileUploadProps) {
             localStorage.setItem("uploadedFileId", uploadData.file_id)
             
             console.log("Data loaded and stored with file_id:", uploadData.file_id)
-          } catch (error) {
-            console.error("Error parsing CSV:", error)
+            
+            // Set up preview for CSV
+            setUploadedFileData({
+              ...uploadData,
+              csvPreview: { employees: employees.slice(0, 10), departments, analytics }
+            })
+            setShowPreview(true)
+            
+          } catch (parseError) {
+            console.error("Error parsing CSV:", parseError)
             setError("Error parsing CSV file. Please check the format.")
           }
         }
@@ -194,39 +207,63 @@ export default function FileUpload({ onDataLoaded }: FileUploadProps) {
         }
 
         reader.readAsText(file)
+        
       } else {
-        // For Excel files, use backend data or create placeholder
-        console.log("Excel file uploaded, using backend data...")
-        
-        // Create placeholder data structure for Excel files
-        const placeholderData = {
-          employees: [],
-          departments: [],
-          analytics: { 
-            totalEmployees: 0, 
-            avgPerformance: 0, 
-            departments: [],
-            summary: uploadData.summary || {}
-          }
-        }
-        
-        onDataLoaded(
-          placeholderData.employees, 
-          placeholderData.departments, 
-          placeholderData.analytics, 
-          uploadData.file_id
-        )
-        
-        localStorage.setItem("uploadedFileId", uploadData.file_id)
-        console.log("Excel file processed with file_id:", uploadData.file_id)
+        // Handle Excel files - Process ALL sheets automatically
+        console.log("Excel file uploaded, processing all sheets automatically...")
+        processExcelFile(uploadData)
       }
 
-    } catch (error) {
-      console.error("Upload error:", error)
-      setError(error instanceof Error ? error.message : "Upload failed")
+    } catch (uploadError) {
+      console.error("Upload error:", uploadError)
+      setError(uploadError instanceof Error ? uploadError.message : "Upload failed")
     } finally {
       setUploading(false)
     }
+  }
+
+  const processExcelFile = (uploadData: any) => {
+    console.log("Processing Excel file with enhanced multi-sheet support:", uploadData.sheets)
+    
+    // Create enhanced data structure for Excel files with skiprows=4 processing
+    const excelAnalytics = {
+      totalEmployees: 0,
+      avgPerformance: 0,
+      departments: [],
+      sheets: uploadData.sheets || [],
+      totalSheets: uploadData.total_sheets || 1,
+      sheetsInfo: uploadData.summary?.sheets_info || {},
+      summary: uploadData.summary || {},
+      fileInfo: {
+        filename: uploadData.filename,
+        fileType: uploadData.file_type,
+        totalSheets: uploadData.total_sheets,
+        allSheetsProcessed: true,
+        processingMethod: "skiprows_4_multi_sheet",
+        combinedShape: uploadData.summary?.combined_df_shape || [0, 0]
+      }
+    }
+    
+    // Log enhanced sheet information
+    console.log(`Excel file processed with skiprows=4:`)
+    console.log(`- Total sheets: ${excelAnalytics.totalSheets}`)
+    console.log(`- Combined shape: ${excelAnalytics.fileInfo.combinedShape}`)
+    console.log(`- Processing method: ${excelAnalytics.fileInfo.processingMethod}`)
+    
+    onDataLoaded([], [], excelAnalytics, uploadData.file_id)
+    
+    localStorage.setItem("uploadedFileId", uploadData.file_id)
+    localStorage.setItem("excelFileData", JSON.stringify(uploadData))
+    
+    console.log("Enhanced Excel file processed, file_id:", uploadData.file_id)
+    
+    // Set up preview for Excel with enhanced info
+    setUploadedFileData({
+      ...uploadData,
+      enhanced_processing: true,
+      processing_method: "skiprows_4_multi_sheet"
+    })
+    setShowPreview(true)
   }
 
   const generateSampleCSV = () => {
@@ -323,6 +360,56 @@ export default function FileUpload({ onDataLoaded }: FileUploadProps) {
     window.URL.revokeObjectURL(url)
   }
 
+  const renderSheetPreview = (sheetName: string, sheetInfo: any) => {
+    if (!sheetInfo.preview_data || !Array.isArray(sheetInfo.preview_data)) {
+      return (
+        <div className="text-center py-4 text-gray-400">
+          <p>No preview data available for this sheet</p>
+          <p className="text-xs">Processed with skiprows=4</p>
+        </div>
+      )
+    }
+
+    return (
+      <div className="overflow-x-auto">
+        <div className="bg-blue-500/10 px-3 py-2 rounded-t border border-blue-500/20">
+          <p className="text-blue-300 text-xs">
+            📋 Processed with skiprows=4 | Shape: {sheetInfo.shape?.[0] || 0} × {sheetInfo.shape?.[1] || 0}
+          </p>
+        </div>
+        <table className="min-w-full">
+          <thead className="bg-white/10">
+            <tr>
+              {sheetInfo.columns?.map((column: string, index: number) => (
+                <th
+                  key={index}
+                  className="px-4 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider"
+                >
+                  {column}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-white/10">
+            {sheetInfo.preview_data.slice(0, 5).map((row: any, rowIndex: number) => (
+              <tr key={rowIndex} className="hover:bg-white/5">
+                {sheetInfo.columns?.map((column: string, colIndex: number) => (
+                  <td key={colIndex} className="px-4 py-3 text-sm text-gray-300">
+                    {String(row[column] || '')}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <div className="bg-white/5 px-4 py-3 text-sm text-gray-400">
+          Showing 5 of {sheetInfo.shape?.[0] || 0} rows, {sheetInfo.shape?.[1] || 0} columns
+          <span className="ml-2 text-blue-400">• Processed with skiprows=4</span>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="space-y-6">
       <div className="border-2 border-dashed border-white/30 rounded-lg p-8 text-center hover:border-blue-400/50 transition-colors glass">
@@ -331,8 +418,8 @@ export default function FileUpload({ onDataLoaded }: FileUploadProps) {
         <div className="space-y-4">
           <div className="text-4xl text-white">📊</div>
           <div>
-            <h3 className="text-lg font-medium text-white mb-2">Upload Data File</h3>
-            <p className="text-gray-400">Upload your CSV or Excel file to analyze employee competencies and performance</p>
+            <h3 className="text-lg font-medium text-white mb-2">Update Data File</h3>
+            <p className="text-gray-400">Upload your CSV or Excel file to analyze data with AI-powered insights</p>
           </div>
 
           <div className="flex justify-center space-x-4">
@@ -341,7 +428,7 @@ export default function FileUpload({ onDataLoaded }: FileUploadProps) {
               disabled={uploading}
               className="bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors font-medium btn-3d"
             >
-              {uploading ? "Uploading to Backend..." : "Choose File"}
+              {uploading ? "Uploading..." : "Choose File"}
             </button>
 
             <button
@@ -363,12 +450,120 @@ export default function FileUpload({ onDataLoaded }: FileUploadProps) {
         </div>
       )}
 
+      {/* File Preview Section */}
+      {showPreview && uploadedFileData && (
+        <Card className="glass border-blue-500/30 bg-blue-500/5">
+          <CardHeader>
+            <CardTitle className="text-blue-300 flex items-center space-x-2">
+              <span>File Preview</span>
+              <span className="text-sm font-normal text-blue-400">
+                ({uploadedFileData.filename})
+              </span>
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {uploadedFileData.sheets && uploadedFileData.sheets.length > 1 ? (
+              // Multi-sheet Excel preview with tabs
+              <div>
+                <div className="mb-4 text-blue-200 text-sm">
+                  Excel file with {uploadedFileData.total_sheets} sheets detected. All sheets will be processed automatically for AI analysis.
+                </div>
+                <Tabs defaultValue={uploadedFileData.sheets[0]} className="w-full">
+                  <TabsList className="glass border-white/20 bg-white/5 p-1 mb-4">
+                    {uploadedFileData.sheets.map((sheetName: string) => (
+                      <TabsTrigger
+                        key={sheetName}
+                        value={sheetName}
+                        className="data-[state=active]:bg-blue-500/20 data-[state=active]:text-white text-gray-300"
+                      >
+                        {sheetName}
+                      </TabsTrigger>
+                    ))}
+                  </TabsList>
+                  
+                  {uploadedFileData.sheets.map((sheetName: string) => (
+                    <TabsContent key={sheetName} value={sheetName}>
+                      <div className="glass rounded-lg overflow-hidden">
+                        <div className="bg-white/10 px-4 py-2">
+                          <h4 className="font-semibold text-white">Sheet: {sheetName}</h4>
+                        </div>
+                        {/* Use sheets_info from the summary for preview data */}
+                        {uploadedFileData.summary?.sheets_info?.[sheetName] ? 
+                          renderSheetPreview(sheetName, uploadedFileData.summary.sheets_info[sheetName]) :
+                          <div className="text-center py-4 text-gray-400">
+                            <p>Sheet preview not available</p>
+                          </div>
+                        }
+                      </div>
+                    </TabsContent>
+                  ))}
+                </Tabs>
+              </div>
+            ) : uploadedFileData.csvPreview ? (
+              // CSV preview
+              <div className="glass rounded-lg overflow-hidden">
+                <div className="bg-white/10 px-4 py-2">
+                  <h4 className="font-semibold text-white">CSV Data Preview</h4>
+                </div>
+                <div className="overflow-x-auto max-h-96">
+                  <table className="min-w-full">
+                    <thead className="bg-white/10">
+                      <tr>
+                        {uploadedFileData.csvPreview.departments.map((dep: string, index: number) => (
+                          <th key={index} className="px-4 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">
+                            {dep}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-white/10">
+                      {uploadedFileData.csvPreview.employees.slice(0, 10).map((emp: any, index: number) => (
+                        <tr key={index} className="hover:bg-white/5">
+                          <td className="px-4 py-3 text-sm text-gray-300">{emp.id}</td>
+                          <td className="px-4 py-3 text-sm text-gray-300">{emp.name}</td>
+                          <td className="px-4 py-3 text-sm text-gray-300">{emp.department}</td>
+                          <td className="px-4 py-3 text-sm text-gray-300">{emp.overallScore}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            ) : (
+              // Single sheet Excel or basic preview using sheets_info
+              <div className="glass rounded-lg overflow-hidden">
+                <div className="bg-white/10 px-4 py-2">
+                  <h4 className="font-semibold text-white">
+                    {uploadedFileData.file_type === '.csv' ? 'CSV Data Preview' : 'Excel Data Preview'}
+                  </h4>
+                </div>
+                {/* Use sheets_info for single sheet or CSV preview */}
+                {uploadedFileData.summary?.sheets_info ? (
+                  (() => {
+                    const firstSheetName = Object.keys(uploadedFileData.summary.sheets_info)[0];
+                    const firstSheetData = uploadedFileData.summary.sheets_info[firstSheetName];
+                    return renderSheetPreview(firstSheetName, firstSheetData);
+                  })()
+                ) : (
+                  <div className="text-center py-4 text-gray-400">
+                    <p>Preview not available</p>
+                    <p className="text-xs">File processed successfully but preview data is missing</p>
+                  </div>
+                )}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
       <div className="glass border-blue-500/30 bg-blue-500/10 rounded-lg p-4">
         <h4 className="font-semibold text-blue-300 mb-2">Supported File Formats</h4>
         <div className="text-blue-200 text-sm space-y-1">
           <p><strong>CSV Files:</strong> Comma-separated values with headers</p>
-          <p><strong>Excel Files:</strong> .xlsx and .xls formats supported</p>
-          <p><strong>Expected Columns:</strong> ID, Name, Department, Overall Score, Strengths, Strength Scores, Development Areas, Development Scores</p>
+          <p><strong>Excel Files:</strong> .xlsx and .xls formats with automatic skiprows=4 processing</p>
+          <p><strong>Multi-Sheet Excel:</strong> All sheets processed automatically, combined for analysis</p>
+          <p><strong>Data Processing:</strong> Headers start from row 5 (skiprows=4), empty rows/columns cleaned</p>
+          <p><strong>Sheet Combination:</strong> Uses common columns or largest sheet for analysis</p>
         </div>
       </div>
     </div>

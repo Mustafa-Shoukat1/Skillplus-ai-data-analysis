@@ -14,48 +14,45 @@ export default function VisualizationLoader({ analysisId }: VisualizationLoaderP
   useEffect(() => {
     const loadVisualization = async () => {
       try {
-        // First try localStorage
+        setLoading(true)
+        setError(null)
+        
+        console.log("Loading visualization for analysis_id:", analysisId)
+        
+        // Try to fetch from backend API first
+        const response = await fetch(`http://localhost:8000/api/analysis/visualization/${analysisId}`)
+        
+        if (response.ok) {
+          const content = await response.text()
+          if (content && content.trim().length > 100) { // Valid HTML content
+            console.log("✅ Loaded visualization from backend:", content.length, "characters")
+            setHtmlContent(content)
+            setLoading(false)
+            return
+          } else {
+            console.warn("Empty or invalid content from backend")
+          }
+        } else {
+          console.warn(`Backend responded with ${response.status}`)
+        }
+        
+        // If backend fails, try localStorage as fallback
         const vizKey = `viz_${analysisId}`
         const localContent = localStorage.getItem(vizKey)
         
-        if (localContent && localContent.length > 100) { // Valid HTML content
-          console.log("Loading visualization from localStorage")
+        if (localContent && localContent.length > 100) {
+          console.log("✅ Loaded visualization from localStorage")
           setHtmlContent(localContent)
           setLoading(false)
           return
         }
         
-        console.log("Visualization not in localStorage, trying backend...")
+        // If both fail, show error
+        throw new Error("No visualization data found")
         
-        // If not in localStorage, try to fetch from backend using the analysis_id
-        const response = await fetch(`http://localhost:8000/api/analysis/visualization/${analysisId}`)
-        
-        if (response.ok) {
-          const content = await response.text()
-          if (content && content.length > 100) { // Valid HTML content
-            console.log("Loading visualization from backend")
-            setHtmlContent(content)
-            
-            // Try to cache it locally for next time (if not too large)
-            try {
-              localStorage.setItem(vizKey, content)
-            } catch (cacheError) {
-              if (cacheError instanceof Error) {
-                console.warn("Could not cache visualization:", cacheError.message)
-              } else {
-                console.warn("Could not cache visualization:", cacheError)
-              }
-            }
-          } else {
-            throw new Error("Empty or invalid content from backend")
-          }
-        } else {
-          throw new Error(`Backend responded with ${response.status}`)
-        }
       } catch (err) {
         console.error("Failed to load visualization:", err)
         setError("Failed to load visualization")
-      } finally {
         setLoading(false)
       }
     }
@@ -83,29 +80,29 @@ export default function VisualizationLoader({ analysisId }: VisualizationLoaderP
     return (
       <div className="w-full h-64 flex items-center justify-center bg-gray-100 rounded">
         <div className="text-center text-gray-600">
-          <p>📊 Visualization temporarily unavailable</p>
-          <p className="text-sm mt-1">
-            {error === "Invalid analysis ID" ? "Invalid ID" : "Large visualization - please refresh to retry"}
-          </p>
-          {analysisId && analysisId !== "unknown" && (
-            <button 
-              onClick={() => window.location.reload()} 
-              className="mt-2 px-3 py-1 bg-purple-500 text-white rounded text-sm hover:bg-purple-600"
-            >
-              Retry Load
-            </button>
-          )}
+          <p>📊 Visualization not available</p>
+          <p className="text-sm mt-1">{error || "No visualization data found"}</p>
+          <button 
+            onClick={() => window.location.reload()} 
+            className="mt-2 px-3 py-1 bg-purple-500 text-white rounded text-sm hover:bg-purple-600"
+          >
+            Retry Load
+          </button>
         </div>
       </div>
     )
   }
 
   return (
-    <iframe
-      srcDoc={htmlContent}
-      className="w-full h-64 border-0 rounded"
-      sandbox="allow-scripts allow-same-origin"
-      title="Analysis Visualization"
-    />
+    <div className="w-full h-64 bg-white rounded overflow-hidden">
+      <iframe
+        srcDoc={htmlContent}
+        className="w-full h-full border-0"
+        sandbox="allow-scripts allow-same-origin"
+        title="Analysis Visualization"
+        style={{ minHeight: '256px' }}
+      />
+    </div>
   )
 }
+

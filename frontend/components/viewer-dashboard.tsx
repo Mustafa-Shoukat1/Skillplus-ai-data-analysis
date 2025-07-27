@@ -17,10 +17,10 @@ export default function ViewerDashboard({ user }: ViewerDashboardProps) {
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    loadVisibleAnalyses()
+    loadActiveAnalyses()
   }, [])
 
-  const loadVisibleAnalyses = async () => {
+  const loadActiveAnalyses = async () => {
     setLoading(true)
     setError(null)
 
@@ -28,13 +28,15 @@ export default function ViewerDashboard({ user }: ViewerDashboardProps) {
       const response = await getVisibleAnalyses()
 
       if (response.success) {
-        setVisibleAnalyses(response.data)
-        console.log("Loaded visible analyses:", response.data)
+        const analysesData = response.data?.data || response.data || []
+        const analysesArray = Array.isArray(analysesData) ? analysesData : []
+        setVisibleAnalyses(analysesArray)
+        console.log("Loaded active analyses:", analysesArray)
       } else {
         setError(response.error || "Failed to load analyses")
       }
     } catch (error) {
-      console.error("Error loading visible analyses:", error)
+      console.error("Error loading active analyses:", error)
       setError("Failed to load analyses")
     } finally {
       setLoading(false)
@@ -82,7 +84,7 @@ export default function ViewerDashboard({ user }: ViewerDashboardProps) {
                 </div>
                 <div>
                   <div className="text-2xl font-bold text-white">
-                    {visibleAnalyses.length}
+                    {Array.isArray(visibleAnalyses) ? visibleAnalyses.length : 0}
                   </div>
                   <div className="text-sm text-gray-300">
                     Available Analyses
@@ -100,7 +102,7 @@ export default function ViewerDashboard({ user }: ViewerDashboardProps) {
                 </div>
                 <div>
                   <div className="text-2xl font-bold text-white">
-                    {visibleAnalyses.filter((a) => a.success).length}
+                    {Array.isArray(visibleAnalyses) ? visibleAnalyses.filter((a) => a.success).length : 0}
                   </div>
                   <div className="text-sm text-gray-300">
                     Successful Analyses
@@ -118,11 +120,11 @@ export default function ViewerDashboard({ user }: ViewerDashboardProps) {
                 </div>
                 <div>
                   <div className="text-2xl font-bold text-white">
-                    {visibleAnalyses.filter((a) => {
+                    {Array.isArray(visibleAnalyses) ? visibleAnalyses.filter((a) => {
                       const analysisDate = new Date(a.created_at)
                       const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
                       return analysisDate > weekAgo
-                    }).length}
+                    }).length : 0}
                   </div>
                   <div className="text-sm text-gray-300">This Week</div>
                 </div>
@@ -141,7 +143,7 @@ export default function ViewerDashboard({ user }: ViewerDashboardProps) {
               </div>
             </CardContent>
           </Card>
-        ) : visibleAnalyses.length === 0 ? (
+        ) : !Array.isArray(visibleAnalyses) || visibleAnalyses.length === 0 ? (
           <Card className="glass border-white/20">
             <CardContent className="p-12 text-center">
               <h3 className="text-xl font-medium text-white mb-2">
@@ -205,14 +207,27 @@ export default function ViewerDashboard({ user }: ViewerDashboardProps) {
                       </div>
                     )}
 
-                    {/* Visualization */}
+                    {/* General Analysis Results (for non-visualization queries) */}
+                    {!analysis.visualization_created && analysis.summary && (
+                      <div className="p-3 bg-blue-500/10 rounded-lg border border-blue-500/20">
+                        <h4 className="font-semibold text-blue-300 mb-2 text-sm flex items-center">
+                          <Brain className="h-4 w-4 mr-1" />
+                          Analysis Results
+                        </h4>
+                        <p className="text-blue-200 text-sm">
+                          {analysis.summary}
+                        </p>
+                      </div>
+                    )}
+
+                    {/* Visualization - FIXED */}
                     {analysis.visualization_created && (
                       <div className="p-3 bg-purple-500/10 rounded-lg border border-purple-500/20">
                         <h4 className="font-semibold text-purple-300 mb-2 text-sm flex items-center">
                           <TrendingUp className="h-4 w-4 mr-1" />
                           Visualization
                         </h4>
-                        <div className="bg-white rounded-lg p-2">
+                        <div className="bg-white rounded-lg overflow-hidden">
                           <VisualizationLoader analysisId={analysisId} />
                         </div>
                       </div>

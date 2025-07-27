@@ -34,7 +34,9 @@ engine = create_engine(
 # Async engine
 async_engine = create_async_engine(
     DATABASE_ASYNC_URL,
-    echo=settings.DEBUG
+    echo=settings.DEBUG,
+    pool_pre_ping=True,
+    connect_args={"check_same_thread": False} if "sqlite" in DATABASE_ASYNC_URL else {}
 )
 
 # Session makers
@@ -42,7 +44,9 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 AsyncSessionLocal = async_sessionmaker(
     bind=async_engine,
     class_=AsyncSession,
-    expire_on_commit=False
+    expire_on_commit=False,
+    autocommit=False,
+    autoflush=False
 )
 
 # Base class for models
@@ -75,7 +79,7 @@ async def get_async_db_dependency() -> AsyncGenerator[AsyncSession, None]:
         yield session
 
 async def run_migrations():
-    """Run database migrations including analysis_id updates"""
+    """Run database migrations including analysis_id updates and field renames"""
     try:
         async with async_engine.begin() as conn:
             # Check current table structure
@@ -138,17 +142,27 @@ async def run_migrations():
             else:
                 logger.info("template_id column already exists")
             
-            # Remove key_insights column if it exists (legacy cleanup)
-            if 'key_insights' in columns:
-                logger.info("⚠️ Note: key_insights column exists but is not used")
-            
-            # Add is_visible column if missing
-            if 'is_visible' not in columns:
-                logger.info("Adding is_visible column to analysis_results table")
-                await conn.execute(text("ALTER TABLE analysis_results ADD COLUMN is_visible BOOLEAN DEFAULT 1 NOT NULL"))
-                logger.info("✅ Migration completed: added is_visible column")
+            # Handle is_visible to is_active migration
+            if 'is_visible' in columns and 'is_active' not in columns:
+                logger.info("Migrating is_visible to is_active column")
+                await conn.execute(text("ALTER TABLE analysis_results ADD COLUMN is_active BOOLEAN DEFAULT 1 NOT NULL"))
+                await conn.execute(text("UPDATE analysis_results SET is_active = is_visible"))
+                logger.info("✅ Migration completed: migrated is_visible to is_active")
+            elif 'is_active' not in columns:
+                logger.info("Adding is_active column to analysis_results table")
+                await conn.execute(text("ALTER TABLE analysis_results ADD COLUMN is_active BOOLEAN DEFAULT 1 NOT NULL"))
+                logger.info("✅ Migration completed: added is_active column")
             else:
-                logger.info("is_visible column already exists")
+                logger.info("is_active column already exists")
+                
+            # Add index for is_active for faster queries
+            await conn.execute(text("CREATE INDEX IF NOT EXISTS idx_is_active ON analysis_results(is_active)"))
+            
+            # Remove legacy is_visible column if it exists and is_active exists
+            if 'is_visible' in columns and 'is_active' in columns:
+                logger.info("Removing legacy is_visible column")
+                # Note: SQLite doesn't support DROP COLUMN, so we'll just leave it
+                logger.info("⚠️ is_visible column left for compatibility (SQLite limitation)")
                 
     except Exception as e:
         logger.warning(f"Migration warning: {e}")
@@ -156,14 +170,26 @@ async def run_migrations():
 async def init_db():
     """Initialize database tables"""
     try:
+        # Import models to ensure they're registered
+        from models.database import User, UploadedFile, AnalysisResult, AITemplate
+        
+        logger.info("Creating database tables...")
         async with async_engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
-        await run_migrations()
-        await create_default_user()
-        await create_default_templates()
+        
         logger.info("✅ Database tables created successfully")
+        
+        # Verify analysis_results table has proper columns
+        async with AsyncSessionLocal() as session:
+            try:
+                # Test query to verify table structure
+                result = await session.execute(text("SELECT analysis_id FROM analysis_results LIMIT 1"))
+                logger.info("✅ analysis_results table structure verified")
+            except Exception as table_error:
+                logger.warning(f"⚠️ analysis_results table verification failed: {table_error}")
+        
     except Exception as e:
-        logger.error(f"❌ Failed to create database tables: {e}")
+        logger.error(f"❌ Failed to initialize database: {e}")
         raise
 
 async def create_default_user():

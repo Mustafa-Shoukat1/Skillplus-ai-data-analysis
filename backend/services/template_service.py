@@ -90,14 +90,13 @@ class TemplateService:
         template_data: AITemplateUpdate, 
         user_id: int
     ) -> Optional[AITemplate]:
-        """Update a user's template"""
+        """Update a template (now allows editing default templates)"""
         
-        # First check if user owns the template
+        # Allow editing of any template the user can access (including defaults)
         result = await db.execute(
             select(AITemplate).where(
                 AITemplate.id == template_id,
-                AITemplate.user_id == user_id,
-                AITemplate.is_default == False  # Can't edit default templates
+                (AITemplate.user_id == user_id) | (AITemplate.is_default == True)
             )
         )
         template = result.scalar_one_or_none()
@@ -264,3 +263,4 @@ class TemplateService:
         
         await db.commit()
         logger.info("Default templates created/verified")
+        

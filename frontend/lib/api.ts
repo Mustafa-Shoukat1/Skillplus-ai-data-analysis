@@ -228,8 +228,10 @@ export const getAnalysisResult = async (taskId: string): Promise<ApiResponse> =>
 }
 
 // Analysis visibility management
-export const toggleAnalysisVisibility = async (analysisId: string, isVisible: boolean): Promise<ApiResponse> => {
+export const toggleAnalysisVisibility = async (analysisId: string, isActive: boolean): Promise<ApiResponse> => {
   try {
+    console.log("API: Toggling visibility for analysis:", analysisId, "to:", isActive)
+    
     const response = await fetch(`${API_BASE_URL}/analysis/visibility/${analysisId}`, {
       method: 'PATCH',
       headers: {
@@ -238,9 +240,11 @@ export const toggleAnalysisVisibility = async (analysisId: string, isVisible: bo
       },
       credentials: 'include',
       body: JSON.stringify({
-        is_visible: isVisible
+        is_active: isActive  // Changed from is_visible to is_active
       }),
     })
+
+    console.log("API: Visibility toggle response status:", response.status)
 
     if (!response.ok) {
       let errorDetail = 'Failed to update visibility'
@@ -254,11 +258,14 @@ export const toggleAnalysisVisibility = async (analysisId: string, isVisible: bo
     }
 
     const data = await response.json()
+    console.log("API: Visibility updated successfully:", data)
+    
     return {
       success: true,
       data: data
     }
   } catch (error) {
+    console.error("API: Visibility toggle error:", error)
     return {
       success: false,
       error: error instanceof Error ? error.message : 'Failed to update visibility'
@@ -268,7 +275,7 @@ export const toggleAnalysisVisibility = async (analysisId: string, isVisible: bo
 
 export const getVisibleAnalyses = async (): Promise<ApiResponse> => {
   try {
-    const response = await fetch(`${API_BASE_URL}/analysis/visible`, {
+    const response = await fetch(`${API_BASE_URL}/analysis/active`, {  // Changed endpoint name
       method: 'GET',
       headers: {
         'Accept': 'application/json',
@@ -288,42 +295,73 @@ export const getVisibleAnalyses = async (): Promise<ApiResponse> => {
   } catch (error) {
     return {
       success: false,
-      error: error instanceof Error ? error.message : 'Failed to fetch visible analyses'
+      error: error instanceof Error ? error.message : 'Failed to fetch active analyses'
     }
   }
 }
 
 // Enhanced getAnalysisHistory with visibility filter
-export const getAnalysisHistory = async (visibleOnly: boolean = false): Promise<ApiResponse> => {
+export const getAnalysisHistory = async (): Promise<ApiResponse<any[]>> => {
   try {
-    const url = visibleOnly 
-      ? `${API_BASE_URL}/analysis/history?visible_only=true`
-      : `${API_BASE_URL}/analysis/history`
-      
-    const response = await fetch(url, {
+    const response = await fetch(`${API_BASE_URL}/analysis/history`, {
       method: 'GET',
       headers: {
-        'Accept': 'application/json',
+        'Content-Type': 'application/json',
       },
-      credentials: 'include',
-    })
+    });
 
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}: ${response.statusText}`)
-    }
+    const data = await response.json();
 
-    const data = await response.json()
-    return {
-      success: true,
-      data: data
+    if (response.ok) {
+      return {
+        success: true,
+        data: data.data || [],
+      };
+    } else {
+      return {
+        success: false,
+        error: data.detail || 'Failed to fetch analysis history',
+      };
     }
   } catch (error) {
+    console.error('Error fetching analysis history:', error);
     return {
       success: false,
-      error: error instanceof Error ? error.message : 'Failed to fetch analysis history'
-    }
+      error: error instanceof Error ? error.message : 'Network error',
+    };
   }
-}
+};
+
+export const getAnalysisResultFromDB = async (analysisId: string): Promise<ApiResponse<any>> => {
+  try {
+    const response = await fetch(`${API_BASE_URL}/analysis/result/db/${analysisId}`, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    });
+
+    const data = await response.json();
+
+    if (response.ok) {
+      return {
+        success: true,
+        data: data,
+      };
+    } else {
+      return {
+        success: false,
+        error: data.detail || 'Failed to fetch analysis result',
+      };
+    }
+  } catch (error) {
+    console.error('Error fetching analysis result:', error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Network error',
+    };
+  }
+};
 
 // Template APIs
 export const getTemplates = async (includeDefaults: boolean = true, category?: string): Promise<ApiResponse> => {

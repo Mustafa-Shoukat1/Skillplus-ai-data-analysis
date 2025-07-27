@@ -23,13 +23,19 @@ class AITemplateUpdate(BaseModel):
     color_scheme: Optional[str] = Field(None, max_length=100)
     is_active: Optional[bool] = None
 
-class AITemplateResponse(AITemplateBase):
+class AITemplateResponse(BaseModel):
     id: int
-    is_default: bool
-    usage_count: int
-    user_id: int
+    title: str
+    description: Optional[str] = None
+    prompt: str
+    category: Optional[str] = None
+    icon: str = "Brain"
+    color_scheme: str = "from-blue-500 to-cyan-500"
+    is_default: bool = False
+    is_active: bool = True
+    usage_count: int = 0
     created_at: datetime
-    updated_at: Optional[datetime] = None
+    user_id: Optional[int] = None  # Add this field
     
     class Config:
         from_attributes = True

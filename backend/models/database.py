@@ -17,32 +17,11 @@ class User(Base):
     is_active = Column(Boolean, default=True)
     is_admin = Column(Boolean, default=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     
     # Relationships
     uploaded_files = relationship("UploadedFile", back_populates="user")
     analysis_results = relationship("AnalysisResult", back_populates="user")
-    ai_templates = relationship("AITemplate", back_populates="user")
-
-class AITemplate(Base):
-    __tablename__ = "ai_templates"
-    
-    id = Column(Integer, primary_key=True, index=True)
-    title = Column(String, nullable=False)
-    description = Column(Text, nullable=True)
-    prompt = Column(Text, nullable=False)
-    category = Column(String, nullable=True)  # e.g., "visualization", "analysis", "custom"
-    icon = Column(String, nullable=True)  # Store icon name or class
-    color_scheme = Column(String, nullable=True)  # Store color gradient class
-    is_default = Column(Boolean, default=False)  # System default templates
-    is_active = Column(Boolean, default=True)
-    usage_count = Column(Integer, default=0)  # Track how often it's used
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
-    
-    # Relationships
-    user = relationship("User", back_populates="ai_templates")
+    created_templates = relationship("AITemplate", back_populates="creator")
 
 class UploadedFile(Base):
     __tablename__ = "uploaded_files"
@@ -53,14 +32,16 @@ class UploadedFile(Base):
     file_path = Column(String, nullable=False)
     file_type = Column(String, nullable=False)
     file_size = Column(Integer, nullable=False)
-    sheets = Column(JSON, nullable=True)  # For Excel files with multiple sheets
+    sheets = Column(JSON, nullable=True)
     total_sheets = Column(Integer, default=1)
-    columns = Column(JSON, nullable=True)  # Store column names
-    shape = Column(JSON, nullable=True)  # Store (rows, columns)
-    data_types = Column(JSON, nullable=True)  # Store column data types
-    summary = Column(JSON, nullable=True)  # Store file summary
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    columns = Column(JSON, nullable=True)
+    shape = Column(JSON, nullable=True)
+    data_types = Column(JSON, nullable=True)
+    summary = Column(JSON, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+    
+    # Foreign key
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     
     # Relationships
     user = relationship("User", back_populates="uploaded_files")
@@ -69,32 +50,32 @@ class UploadedFile(Base):
 class AnalysisResult(Base):
     __tablename__ = "analysis_results"
     
-    id = Column(Integer, primary_key=True, index=True)  # Keep for database relationships
-    analysis_id = Column(String, unique=True, index=True, nullable=False)  # Main identifier
+    id = Column(Integer, primary_key=True, index=True)
+    analysis_id = Column(String, unique=True, index=True, nullable=False)
     user_query = Column(Text, nullable=False)
-    success = Column(Boolean, nullable=False, default=False)
+    success = Column(Boolean, default=False)
     
     # Classification data
     query_type = Column(String, nullable=True)
     classification_reasoning = Column(Text, nullable=True)
     user_intent = Column(Text, nullable=True)
-    requires_data_filtering = Column(Boolean, nullable=True)
+    requires_data_filtering = Column(Boolean, default=False)
     classification_confidence = Column(Float, nullable=True)
     
-    # Code analysis
+    # Code analysis data
     query_understanding = Column(Text, nullable=True)
     approach = Column(Text, nullable=True)
-    required_columns = Column(JSON, nullable=True, default=list)
+    required_columns = Column(JSON, nullable=True)
     generated_code = Column(Text, nullable=True)
     expected_output = Column(Text, nullable=True)
     
-    # Execution results
-    execution_success = Column(Boolean, nullable=True)
+    # Execution data
+    execution_success = Column(Boolean, default=False)
     execution_output = Column(Text, nullable=True)
     visualization_created = Column(Boolean, default=False)
-    file_paths = Column(JSON, nullable=True, default=list)
+    file_paths = Column(JSON, nullable=True)
     
-    # Final results
+    # Final results data
     final_answer = Column(Text, nullable=True)
     summary = Column(Text, nullable=True)
     visualization_info = Column(JSON, nullable=True)
@@ -102,40 +83,42 @@ class AnalysisResult(Base):
     # Visualization HTML content
     visualization_html = Column(Text, nullable=True)
     
-    # NEW: Visibility toggle for graphs/visualizations
-    is_visible = Column(Boolean, default=True, nullable=False)  # Controls if visualization is shown in viewer dashboard
-    
-    # Template information
-    template_id = Column(Integer, ForeignKey("ai_templates.id"), nullable=True)
-    
     # Metadata
     retry_count = Column(Integer, default=0)
-    processing_time = Column(Float, nullable=True)  # in seconds
+    processing_time = Column(Float, nullable=True)
     model_used = Column(String, nullable=True)
-    
-    # Foreign keys
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    file_id = Column(Integer, ForeignKey("uploaded_files.id"), nullable=False)
+    is_active = Column(Boolean, default=True)  # For visibility toggle
     
     # Timestamps
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     completed_at = Column(DateTime(timezone=True), nullable=True)
     
+    # Foreign keys
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    file_id = Column(Integer, ForeignKey("uploaded_files.id"), nullable=False)
+    
     # Relationships
     user = relationship("User", back_populates="analysis_results")
     file = relationship("UploadedFile", back_populates="analysis_results")
-    template = relationship("AITemplate")
 
-class APIUsage(Base):
-    __tablename__ = "api_usage"
+class AITemplate(Base):
+    __tablename__ = "ai_templates"
     
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    endpoint = Column(String, nullable=False)
-    method = Column(String, nullable=False)
-    status_code = Column(Integer, nullable=False)
-    processing_time = Column(Float, nullable=True)
+    title = Column(String, nullable=False)
+    description = Column(Text, nullable=True)
+    prompt = Column(Text, nullable=False)
+    category = Column(String, nullable=True)
+    icon = Column(String, default="Brain")
+    color_scheme = Column(String, default="from-blue-500 to-cyan-500")
+    is_default = Column(Boolean, default=False)
+    is_active = Column(Boolean, default=True)
+    usage_count = Column(Integer, default=0)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     
-    # Relationship
-    user = relationship("User")
+    # Foreign key - Use created_by to match existing table
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    
+    # Relationships
+    creator = relationship("User", back_populates="created_templates")

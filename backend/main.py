@@ -36,28 +36,16 @@ app = FastAPI(
     redoc_url="/redoc"
 )
 
-# CORS middleware - ENHANCED configuration
+# CORS middleware - FIXED configuration
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "http://localhost:3000",
-        "http://127.0.0.1:3000",
-        "http://localhost:3001",
-        "http://127.0.0.1:3001"
-    ],  # More specific origins for development
+        "http://127.0.0.1:3000"
+    ],  # Specific origins for development
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allow_headers=[
-        "Accept",
-        "Accept-Language",
-        "Content-Language",
-        "Content-Type",
-        "Authorization",
-        "X-Requested-With",
-        "Origin",
-        "Access-Control-Request-Method",
-        "Access-Control-Request-Headers"
-    ],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+    allow_headers=["*"],
     expose_headers=["*"]
 )
 
@@ -120,6 +108,18 @@ app.include_router(data_analysis.router, prefix=settings.API_PREFIX)
 app.include_router(templates.router, prefix=settings.API_PREFIX)
 
 def main():
+    import uvicorn
+    uvicorn.run(
+        "main:app",
+        host=settings.HOST,
+        port=settings.PORT,
+        reload=settings.DEBUG,
+        log_level="debug" if settings.DEBUG else "info"
+    )
+
+
+if __name__ == "__main__":
+    main()
     import uvicorn
     uvicorn.run(
         "main:app",
