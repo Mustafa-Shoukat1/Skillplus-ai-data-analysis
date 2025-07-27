@@ -1,3 +1,4 @@
+import json
 import os
 import traceback
 from typing import Any, Dict
@@ -11,7 +12,8 @@ from models.data_analysis import (
 from ..prompts.prompts import (
     PROMPT_CLASSIFY_QUERY, PROMPT_GENERAL_CODE_GENERATION,
     PROMPT_VISUALIZATION_CODE_GENERATION, PROMPT_CODE_REVIEW,
-    PROMPT_CODE_REWRITE, PROMPT_FINAL_RESULTS
+    PROMPT_CODE_REWRITE, PROMPT_FINAL_RESULTS,
+    PROMPT_DATA_EXTRACTION, PROMPT_ECHARTS_GENERATION
 )
 from core.logger import logger, log_exception
 class QueryClassificationNode(StructuredChainNode):
@@ -362,7 +364,7 @@ except Exception as e:
         })
 
 class CodeExecutionNode(BaseNode):
-    """Node 5: Execute Python Code with proper dataframe injection"""
+    """Node 5: Execute Python Code with ECharts support"""
     
     def __init__(self):
         super().__init__("CodeExecution")
@@ -393,15 +395,17 @@ class CodeExecutionNode(BaseNode):
             # Execute code
             output = self.py_tool.invoke(full_code)
             
-            # For general queries, don't check for visualization files
+            # Check for visualization files (ECharts HTML)
+            created_files = self._get_created_files()
+            viz_created = len(created_files) > 0 or self._check_visualization_created(state.current_code)
+            
+            # For ECharts, also check charts directory
             if is_visualization_query:
-                created_files = self._get_created_files()
-                viz_created = len(created_files) > 0 or self._check_visualization_created(state.current_code)
-            else:
-                # For general queries, explicitly set no visualization
-                created_files = []
-                viz_created = False
-                self.logger.info("General query executed - no visualization files expected")
+                charts_dir = os.path.abspath('charts')
+                chart_file = os.path.join(charts_dir, 'visualization.html')
+                if os.path.exists(chart_file) and chart_file not in created_files:
+                    created_files.append(chart_file)
+                    viz_created = True
             
             # Create execution result
             result = ExecutionResult(
@@ -427,41 +431,39 @@ class CodeExecutionNode(BaseNode):
             return state.model_copy(update={"execution_result": result})
     
     def _prepare_code_for_execution(self, df, code: str, is_visualization: bool = False) -> str:
-        """Prepare code with the actual dataframe data - NO FILE LOADING"""
+        """Prepare code with the actual dataframe data"""
         
         if is_visualization:
-            # Full setup for visualization queries - but with dataframe data directly
+            # Setup for ECharts visualization
             setup_code = f"""
 import pandas as pd
 import numpy as np
-import plotly.express as px
-import plotly.graph_objects as go
+import json
 import os
 import warnings
 warnings.filterwarnings('ignore')
 
-# Create plots directory
-plots_dir = os.path.abspath('plots')
-os.makedirs(plots_dir, exist_ok=True)
+# Create charts directory for ECharts
+charts_dir = os.path.abspath('charts')
+os.makedirs(charts_dir, exist_ok=True)
 
-# Load the dataframe from provided data (NOT from file)
+# Load the dataframe from provided data
 df_data = {df.to_dict('records')}
 df = pd.DataFrame(df_data)
 
 print(f"Dataframe loaded successfully. Shape: {{df.shape}}")
 print(f"Columns: {{df.columns.tolist()}}")
-print(f"Sample data:")
-print(df.head(3))
+print(f"Charts directory: {{charts_dir}}")
 """
         else:
-            # Minimal setup for general queries - NO VISUALIZATION IMPORTS
+            # Minimal setup for general queries
             setup_code = f"""
 import pandas as pd
 import numpy as np
 import warnings
 warnings.filterwarnings('ignore')
 
-# Load the dataframe from provided data (NOT from file)
+# Load the dataframe from provided data
 df_data = {df.to_dict('records')}
 df = pd.DataFrame(df_data)
 
@@ -493,37 +495,35 @@ print(f"Columns: {{df.columns.tolist()}}")
         return '\n'.join(cleaned_lines)
     
     def _check_visualization_created(self, code: str) -> bool:
-        """Check if visualization was created - only for visualization queries"""
+        """Check if visualization was created"""
         viz_indicators = [
-            "plots/visualization.html",
-            "write_html",
-            "to_html",
-            "fig.write_html",
-            "plotly",
-            "matplotlib",
-            "seaborn"
+            "charts/visualization.html",
+            "echarts",
+            "ECharts",
+            "charts_dir",
+            "html_content"
         ]
         return any(indicator in code for indicator in viz_indicators)
     
     def _get_created_files(self) -> list:
-        """Get list of created files - only check if we expect visualization files"""
+        """Get list of created files"""
         files = []
         
-        # Check multiple possible locations
-        possible_paths = [
-            'plots/visualization.html',
-            './plots/visualization.html',
-            os.path.abspath('plots/visualization.html'),
-            os.path.join(os.getcwd(), 'plots', 'visualization.html')
-        ]
+        # Check ECharts charts directory
+        charts_dir = os.path.abspath('charts')
+        chart_file = os.path.join(charts_dir, 'visualization.html')
         
-        for path in possible_paths:
-            if os.path.exists(path):
-                abs_path = os.path.abspath(path)
-                if abs_path not in files:
-                    files.append(abs_path)
-                    self.logger.info(f"Found visualization file: {abs_path}")
-                break
+        if os.path.exists(chart_file):
+            files.append(chart_file)
+            self.logger.info(f"Found ECharts visualization: {chart_file}")
+        
+        # Check legacy plots directory for backwards compatibility
+        plots_dir = os.path.abspath('plots')
+        plot_file = os.path.join(plots_dir, 'visualization.html')
+        
+        if os.path.exists(plot_file):
+            files.append(plot_file)
+            self.logger.info(f"Found legacy visualization: {plot_file}")
         
         return files
 
@@ -590,3 +590,135 @@ class FinalResultsNode(StructuredChainNode):
         self.logger.info(f"🎯 Final results generated: success={final_results.success}")
         
         return state.model_copy(update={"final_results": final_results})
+        
+        return state.model_copy(update={"final_results": final_results})
+
+class DataExtractionNode(StructuredChainNode):
+    """Node for filtering and extracting relevant data"""
+    
+    def __init__(self, llm: Any):
+        super().__init__("DataExtraction", llm, CodeAnalysis)
+    
+    def create_chain_with_structured_llm(self, structured_llm):
+        return PROMPT_DATA_EXTRACTION | structured_llm
+    
+    def create_fallback_response(self, inputs: Dict[str, Any], error: Exception) -> CodeAnalysis:
+        """Create fallback data extraction code"""
+        self.logger.warning(f"Creating fallback data extraction due to error: {str(error)}")
+        
+        columns = inputs.get("columns", [])
+        
+        fallback_code = f"""
+# Data extraction and filtering
+import pandas as pd
+import numpy as np
+
+print("=== DATA EXTRACTION ===")
+print(f"Original dataset shape: {{df.shape}}")
+
+# Basic data info
+print("\\nDataset columns:")
+for col in df.columns:
+    print(f"- {{col}}: {{df[col].dtype}}")
+
+# Extract relevant data based on query
+extracted_data = df.copy()
+
+# Basic filtering (remove null values)
+extracted_data = extracted_data.dropna()
+
+print(f"\\nAfter basic filtering: {{extracted_data.shape}}")
+
+# Summary statistics
+if len(extracted_data) > 0:
+    print("\\nSummary statistics:")
+    print(extracted_data.describe())
+    
+    # Prepare data for visualization
+    chart_data = {{}}
+    
+    # Get numeric columns
+    numeric_cols = extracted_data.select_dtypes(include=['number']).columns.tolist()
+    categorical_cols = extracted_data.select_dtypes(include=['object']).columns.tolist()
+    
+    if numeric_cols:
+        chart_data['numeric'] = numeric_cols[:5]  # Limit to 5 columns
+    if categorical_cols:
+        chart_data['categorical'] = categorical_cols[:3]  # Limit to 3 columns
+    
+    print(f"\\nData ready for visualization: {{chart_data}}")
+else:
+    print("\\nNo data available after filtering")
+    chart_data = {{'error': 'No data available'}}
+"""
+        
+        return CodeAnalysis(
+            query_understanding=f"Fallback data extraction for: {inputs.get('user_query', 'unknown query')}",
+            approach="Basic data filtering and preparation for visualization",
+            required_columns=columns[:5],
+            generated_code=fallback_code,
+            expected_output="Filtered dataset and summary statistics"
+        )
+    
+    def execute(self, state: AnalysisState) -> AnalysisState:
+        code_analysis = self.invoke_chain_with_fallback({
+            "user_query": state.user_query,
+            "classification": state.classification.model_dump_json() if state.classification else "{}",
+            "dataset_shape": state.df.shape,
+            "columns": state.df.columns.tolist(),
+            "data_types": {str(col): str(dtype) for col, dtype in state.df.dtypes.items()},
+            "sample_data": state.df.head(3).to_string()
+        })
+        
+        self.logger.info(f"Generated data extraction code with {len(code_analysis.required_columns)} required columns")
+        
+        return state.model_copy(update={
+            "code_analysis": code_analysis,
+            "current_code": code_analysis.generated_code,
+            "data_extraction": code_analysis
+        })
+
+class EchartsVisualizationNode(StructuredChainNode):
+    """Node for generating ECharts visualization code"""
+    
+    def __init__(self, llm: Any):
+        super().__init__("EchartsVisualization", llm, CodeAnalysis)
+    
+    def create_chain_with_structured_llm(self, structured_llm):
+        return PROMPT_ECHARTS_GENERATION | structured_llm
+    
+    def create_fallback_response(self, inputs: Dict[str, Any], error: Exception) -> CodeAnalysis:
+        """Create fallback ECharts visualization code"""
+        self.logger.warning(f"Creating fallback ECharts code due to error: {str(error)}")
+        
+        columns = inputs.get("columns", [])
+        data_types = inputs.get("data_types", {})
+        user_query = inputs.get('user_query', '')
+        
+        # Find numeric columns for visualization
+        numeric_cols = [col for col, dtype in data_types.items() if 'int' in str(dtype).lower() or 'float' in str(dtype).lower()]
+        categorical_cols = [col for col, dtype in data_types.items() if 'object' in str(dtype).lower()]
+        
+        # Get safe column names for fallback
+        safe_numeric_col = numeric_cols[0] if numeric_cols else 'value'
+        safe_categorical_col = categorical_cols[0] if categorical_cols else 'category'
+        
+        return None
+    def execute(self, state: AnalysisState) -> AnalysisState:
+        """Execute the ECharts visualization node"""
+        code_analysis = self.invoke_chain_with_fallback({
+            "user_query": state.user_query,
+            "classification": state.classification.model_dump_json() if state.classification else "{}",
+            "extracted_data_info": state.data_extraction.model_dump_json() if hasattr(state, 'data_extraction') else "{}",
+            "dataset_shape": state.df.shape,
+            "columns": state.df.columns.tolist(),
+            "data_types": {str(col): str(dtype) for col, dtype in state.df.dtypes.items()},
+            "sample_data": state.df.head(3).to_string()
+        })
+        
+        self.logger.info(f"Generated ECharts visualization code targeting columns: {code_analysis.required_columns}")
+        
+        return state.model_copy(update={
+            "code_analysis": code_analysis,
+            "current_code": code_analysis.generated_code
+        })

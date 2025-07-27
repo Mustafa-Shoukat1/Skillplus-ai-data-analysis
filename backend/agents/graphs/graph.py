@@ -7,82 +7,89 @@ from langchain_anthropic.chat_models import ChatAnthropic
 
 from models.data_analysis import AnalysisState
 from ..nodes.nodes import (
-    QueryClassificationNode, GeneralCodeGenerationNode, VisualizationCodeGenerationNode,
+    QueryClassificationNode, DataExtractionNode, EchartsVisualizationNode,
     CodeReviewNode, CodeRewriteNode, CodeExecutionNode, FinalResultsNode
 )
-from ..edges.edges import classify_query_edge, code_review_edge, execution_retry_edge
+from ..edges.edges import classify_query_edge, data_ready_edge, code_review_edge, execution_retry_edge
 from core.config import settings
 from core.logger import logger, log_exception
+
 class DataAnalysisWorkflow:
-    """Optimized data analysis workflow with structured output and reliable error handling"""
-    
-    def __init__(self, model_name: str = 'claude-3-opus-20240229', temperature: float = 0):
-        self.logger = logging.getLogger(__name__)
-        
-        # Set the API key for Anthropic
-        if not os.getenv("ANTHROPIC_API_KEY") and settings.ANTHROPIC_API_KEY:
-            os.environ["ANTHROPIC_API_KEY"] = settings.ANTHROPIC_API_KEY
-        
-        # Initialize LLM with optimized retry configuration
+    """Enhanced data analysis workflow with ECharts visualization"""
+
+    def __init__(self, model_name: str = 'claude-3-opus-20240229'):
+        """Initialize the workflow with specified model"""
         try:
             self.llm = ChatAnthropic(
-                model=model_name, 
-                temperature=temperature,
-                max_retries=5,  # Increased retries for better reliability
-                timeout=120,    # Increased timeout
-                max_tokens=4000  # Ensure enough tokens for structured output
+                model=model_name,
+                api_key=settings.ANTHROPIC_API_KEY,
+                temperature=0.1,
+                max_tokens=4000
             )
-            self.logger.info(f"✅ LLM initialized successfully with model: {model_name}")
+            
+            # Initialize nodes
+            self.query_classification = QueryClassificationNode(self.llm)
+            self.data_extraction = DataExtractionNode(self.llm)
+            self.echarts_visualization = EchartsVisualizationNode(self.llm)
+            self.code_review = CodeReviewNode(self.llm)
+            self.code_rewrite = CodeRewriteNode(self.llm)
+            self.code_execution = CodeExecutionNode()
+            self.final_results = FinalResultsNode(self.llm)
+            
+            # Build the graph
+            self.graph = self._build_graph()
+            
         except Exception as e:
-            self.logger.error(f"❌ Failed to initialize LLM: {e}")
+            logger.error(f"Failed to initialize DataAnalysisWorkflow: {e}")
+            log_exception(logger, "Workflow initialization error", e)
             raise
-        
-        # Build graph
-        self.graph = self._build_graph()
-    
+
     def _build_graph(self) -> StateGraph:
-        """Build the optimized analysis graph with structured output nodes"""
-        self.logger.info("🏗️ Building optimized analysis graph with structured output...")
+        """Build the enhanced workflow graph"""
         
-        builder = StateGraph(state_schema=AnalysisState)
+        workflow = StateGraph(AnalysisState)
         
-        # Add nodes with structured output
-        self.logger.debug("Adding structured output nodes...")
-        try:
-            builder.add_node("classify_query", QueryClassificationNode(self.llm))
-            builder.add_node("general_code_gen", GeneralCodeGenerationNode(self.llm))
-            builder.add_node("viz_code_gen", VisualizationCodeGenerationNode(self.llm))
-            builder.add_node("review_code", CodeReviewNode(self.llm))
-            builder.add_node("rewrite_code", CodeRewriteNode(self.llm))
-            builder.add_node("execute_code", CodeExecutionNode())
-            builder.add_node("final_results", FinalResultsNode(self.llm))
-            self.logger.debug("✅ All nodes added successfully")
-        except Exception as e:
-            self.logger.error(f"❌ Failed to add nodes: {e}")
-            raise
+        # Add nodes
+        workflow.add_node("classify_query", self.query_classification.execute)
+        workflow.add_node("extract_data", self.data_extraction.execute)
+        workflow.add_node("generate_echarts", self.echarts_visualization.execute)
+        workflow.add_node("review_code", self.code_review.execute)
+        workflow.add_node("rewrite_code", self.code_rewrite.execute)
+        workflow.add_node("execute_code", self.code_execution.execute)
+        workflow.add_node("final_results", self.final_results.execute)
         
         # Set entry point
-        builder.set_entry_point("classify_query")
+        workflow.set_entry_point("classify_query")
         
-        # Add edges with improved flow control
-        self.logger.debug("Setting up graph edges...")
-        
-        # Node 1 → Node 2A/2B (conditional routing based on query type)
-        builder.add_conditional_edges(
+        # Add conditional edges
+        workflow.add_conditional_edges(
             "classify_query",
             classify_query_edge,
             {
-                "general_path": "general_code_gen",
-                "visualization_path": "viz_code_gen"
+                "data_extraction": "extract_data",
+                "final_results": "final_results"  # For simple queries
             }
         )
         
-        # Node 2A/2B → Node 3 (both paths converge at review)
-        builder.add_edge("general_code_gen", "review_code")
-        builder.add_edge("viz_code_gen", "review_code")
+        workflow.add_conditional_edges(
+            "extract_data",
+            data_ready_edge,
+            {
+                "generate_visualization": "generate_echarts",
+                "final_results": "final_results"
+            }
+        )
         
-        # Node 3 → Node 4/5 (conditional routing based on review)
-        builder.add_conditional_edges(
+        workflow.add_conditional_edges(
+            "generate_echarts",
+            code_review_edge,
+            {
+                "execute_code": "execute_code",
+                "rewrite_code": "rewrite_code"
+            }
+        )
+        
+        workflow.add_conditional_edges(
             "review_code",
             code_review_edge,
             {
@@ -91,11 +98,16 @@ class DataAnalysisWorkflow:
             }
         )
         
-        # Node 4 → Node 3 (rewrite loops back to review)
-        builder.add_edge("rewrite_code", "review_code")
+        workflow.add_conditional_edges(
+            "rewrite_code",
+            code_review_edge,
+            {
+                "execute_code": "execute_code",
+                "review_code": "review_code"
+            }
+        )
         
-        # Node 5 → Node 6/4 (conditional routing based on execution result)
-        builder.add_conditional_edges(
+        workflow.add_conditional_edges(
             "execute_code",
             execution_retry_edge,
             {
@@ -104,129 +116,128 @@ class DataAnalysisWorkflow:
             }
         )
         
-        # Node 6 → END (final results to end)
-        builder.add_edge("final_results", END)
+        # End nodes
+        workflow.add_edge("final_results", END)
         
-        self.logger.info("✅ Optimized analysis graph built successfully with structured output")
-        return builder.compile()
+        return workflow.compile()
     
-    def run_analysis(self, df, user_query: str) -> dict:
-        """Run the complete analysis workflow with enhanced error handling and logging"""
-        self.logger.info(f"🎯 Starting analysis workflow for query: '{user_query}'")
-        self.logger.info(f"📊 Dataset shape: {df.shape}")
-        self.logger.debug(f"📊 Dataset columns: {df.columns.tolist()}")
-        
-        # Validate inputs
-        if not user_query or len(user_query.strip()) < 5:
-            error_msg = f"Invalid query: '{user_query}' - too short or empty"
-            self.logger.error(error_msg)
-            return self._create_error_json_output(error_msg, user_query)
-        
-        if df.empty:
-            error_msg = "Empty dataframe provided"
-            self.logger.error(error_msg)
-            return self._create_error_json_output(error_msg, user_query)
-        
-        # Create initial state with validation
+    async def run(self, df, user_query: str) -> dict:
+        """Run the enhanced analysis workflow"""
         try:
+            logger.info(f"Starting enhanced workflow for query: {user_query[:100]}...")
+            
             initial_state = AnalysisState(
                 user_query=user_query,
-                df=df,
-                max_retries=3
+                df=df
             )
             
-            self.logger.info("✅ Initial state created successfully")
-            self.logger.debug(f"Initial state - query: '{initial_state.user_query}', df_shape: {initial_state.df.shape}")
+            result = await self.graph.ainvoke(initial_state)
+            
+            logger.info("Enhanced workflow completed successfully")
+            return {
+                "success": True,
+                "classification": result.classification,
+                "data_extraction": result.data_extraction if hasattr(result, 'data_extraction') else None,
+                "generated_code": result.current_code,
+                "execution": result.execution_result,
+                "final_results": result.final_results,
+                "visualization_html": result.visualization_html if hasattr(result, 'visualization_html') else None
+            }
             
         except Exception as e:
-            error_msg = f"Failed to create initial state: {str(e)}"
-            self.logger.error(error_msg)
-            log_exception(self.logger, "Initial state creation failed")
-            return self._create_error_json_output(error_msg, user_query)
-        
+            logger.error(f"Enhanced workflow failed: {e}")
+            log_exception(logger, "Enhanced workflow error", e)
+            return {
+                "success": False,
+                "error": str(e),
+                "classification": None,
+                "execution": None,
+                "final_results": None
+            }
+
+    def run_analysis(self, df, user_query: str) -> dict:
+        """Process workflow result and return structured output"""
         try:
-            # Execute the workflow with detailed logging
-            self.logger.info("🚀 Starting workflow execution...")
-            start_time = time.time()
+            logger.info(f"Processing workflow result for query: {user_query[:100]}...")
             
-            result = self.graph.invoke(initial_state)
+            # Run the async workflow
+            import asyncio
+            try:
+                loop = asyncio.get_event_loop()
+            except RuntimeError:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
             
-            execution_time = time.time() - start_time
-            self.logger.info(f"⏱️ Workflow execution completed in {execution_time:.2f} seconds")
+            if loop.is_running():
+                # If loop is already running, create a task
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor() as executor:
+                    future = executor.submit(asyncio.run, self.run(df, user_query))
+                    result = future.result()
+            else:
+                result = loop.run_until_complete(self.run(df, user_query))
             
-            # Validate and process result
-            processed_result = self._process_workflow_result(result, user_query)
+            # Helper function to safely extract dict from result objects
+            def safe_model_dump(obj):
+                if obj is None:
+                    return None
+                if hasattr(obj, 'model_dump'):
+                    return obj.model_dump()
+                elif hasattr(obj, 'dict'):
+                    return obj.dict()
+                elif isinstance(obj, dict):
+                    return obj
+                else:
+                    return str(obj)
             
-            self.logger.info("🎉 Analysis workflow completed successfully")
+            # Process result based on type
+            if isinstance(result, dict):
+                # If already a dict, use it directly
+                processed_result = result
+            else:
+                # Extract data from result object
+                classification_dict = safe_model_dump(getattr(result, 'classification', None))
+                analysis_dict = safe_model_dump(getattr(result, 'code_analysis', None))
+                review_dict = safe_model_dump(getattr(result, 'code_review', None))
+                execution_dict = safe_model_dump(getattr(result, 'execution_result', None))
+                final_results_dict = safe_model_dump(getattr(result, 'final_results', None))
+                
+                # Log execution result for debugging
+                if execution_dict:
+                    logger.info(f"Execution result - success: {execution_dict.get('success')}, visualization_created: {execution_dict.get('visualization_created')}")
+                
+                processed_result = {
+                    "success": True,
+                    "user_query": user_query,
+                    "classification": classification_dict,
+                    "analysis": analysis_dict,
+                    "review": review_dict,
+                    "execution": execution_dict,
+                    "final_results": final_results_dict,
+                    "generated_code": getattr(result, 'current_code', None),
+                    "retry_count": getattr(result, 'retry_count', 0),
+                    "workflow_completed": True
+                }
+                
+                # Determine overall success - simplified logic
+                execution_success = execution_dict and execution_dict.get('success', False) if execution_dict else False
+                final_success = final_results_dict and final_results_dict.get('success', False) if final_results_dict else False
+                has_code = bool(getattr(result, 'current_code', None))
+                
+                # Simple success determination: if any major component succeeded
+                overall_success = execution_success or final_success or has_code
+                processed_result["success"] = overall_success
+            
+            query_type = processed_result.get('classification', {}).get('query_type', 'unknown') if processed_result.get('classification') else 'unknown'
+            logger.info(f"Workflow result processed: success={processed_result.get('success')}, query_type={query_type}")
+            logger.debug(f"Output contains - classification: {bool(processed_result.get('classification'))}, analysis: {bool(processed_result.get('analysis'))}, execution: {bool(processed_result.get('execution'))}, final_results: {bool(processed_result.get('final_results'))}")
+            
             return processed_result
             
         except Exception as e:
-            error_msg = f"Workflow execution failed: {str(e)}"
-            self.logger.error(error_msg)
-            log_exception(self.logger, "Workflow execution failed")
-            return self._create_error_json_output(error_msg, user_query)
-    
-    def _process_workflow_result(self, result, user_query: str) -> dict:
-        """Process and structure the workflow result with enhanced data preservation"""
-        try:
-            # Handle both dict and AnalysisState objects
-            if isinstance(result, dict):
-                # Result is already a dict (error case)
-                self.logger.warning("Received dict result instead of AnalysisState object")
-                return result
+            logger.error(f"Failed to process workflow result: {e}")
+            log_exception(logger, "Result processing error", e)
             
-            # Log the actual result type and query type for debugging
-            query_type = result.classification.query_type.value if result.classification else "unknown"
-            self.logger.info(f"Processing workflow result for query type: {query_type}")
-            
-            # Helper function to safely convert Pydantic to dict while preserving all data
-            def safe_model_dump(obj):
-                if obj and hasattr(obj, 'model_dump'):
-                    dumped = obj.model_dump()
-                    self.logger.debug(f"Dumped {type(obj).__name__}: {list(dumped.keys()) if dumped else 'None'}")
-                    return dumped
-                return None
-            
-            # Extract structured data from the actual AnalysisState object
-            classification_dict = safe_model_dump(result.classification)
-            analysis_dict = safe_model_dump(result.code_analysis)
-            review_dict = safe_model_dump(result.code_review)
-            execution_dict = safe_model_dump(result.execution_result)
-            final_results_dict = safe_model_dump(result.final_results)
-            
-            # Log execution result for debugging
-            if execution_dict:
-                self.logger.info(f"Execution result - success: {execution_dict.get('success')}, visualization_created: {execution_dict.get('visualization_created')}")
-            
-            output = {
-                "success": True,
-                "user_query": user_query,
-                "classification": classification_dict,
-                "analysis": analysis_dict,
-                "review": review_dict,
-                "execution": execution_dict,
-                "final_results": final_results_dict,
-                "generated_code": result.current_code,
-                "retry_count": result.retry_count,
-                "workflow_completed": True
-            }
-            
-            # Determine overall success - simplified logic
-            execution_success = result.execution_result and result.execution_result.success
-            final_success = result.final_results and result.final_results.success
-            has_code = bool(result.current_code)
-            
-            # Simple success determination: if any major component succeeded
-            overall_success = execution_success or final_success or has_code
-            output["success"] = overall_success
-            
-            self.logger.info(f"Workflow result processed: success={overall_success}, query_type={query_type}")
-            self.logger.debug(f"Output contains - classification: {bool(classification_dict)}, analysis: {bool(analysis_dict)}, execution: {bool(execution_dict)}, final_results: {bool(final_results_dict)}")
-            
-            return output
-            
-        except Exception as e:
-            self.logger.error(f"Failed to process workflow result: {e}")
             # Create a simple fallback result
             fallback_result = {
                 "success": False,
@@ -264,7 +275,7 @@ class DataAnalysisWorkflow:
                         fallback_result["success"] = True
                         fallback_result["error"] = None
             except Exception as extraction_error:
-                self.logger.error(f"Failed to extract data from result: {extraction_error}")
+                logger.error(f"Failed to extract data from result: {extraction_error}")
             
             return fallback_result
     
@@ -284,15 +295,16 @@ class DataAnalysisWorkflow:
             "workflow_completed": False
         }
 
+
 # Convenience function with enhanced error handling
 def run_analysis(df, user_query: str, model_name: str = 'claude-3-opus-20240229') -> dict:
     """Run optimized analysis with structured output and enhanced reliability"""
-    logger = logging.getLogger(__name__)
+    logger_instance = logging.getLogger(__name__)
     
     try:
         # Validate inputs before creating workflow
         if not user_query or len(user_query.strip()) < 5:
-            logger.error(f"Invalid query provided: '{user_query}'")
+            logger_instance.error(f"Invalid query provided: '{user_query}'")
             return {
                 "success": False,
                 "user_query": user_query,
@@ -308,7 +320,7 @@ def run_analysis(df, user_query: str, model_name: str = 'claude-3-opus-20240229'
             }
         
         if df is None or df.empty:
-            logger.error("Empty or None dataframe provided")
+            logger_instance.error("Empty or None dataframe provided")
             return {
                 "success": False,
                 "user_query": user_query,
@@ -324,25 +336,25 @@ def run_analysis(df, user_query: str, model_name: str = 'claude-3-opus-20240229'
             }
         
         # Log input details
-        logger.info(f"Creating workflow with model: {model_name}")
-        logger.info(f"Query to analyze: '{user_query}'")
-        logger.info(f"Dataframe shape: {df.shape}")
-        logger.debug(f"Dataframe columns: {df.columns.tolist()}")
-        logger.debug(f"Sample data:\n{df.head(2)}")
+        logger_instance.info(f"Creating workflow with model: {model_name}")
+        logger_instance.info(f"Query to analyze: '{user_query}'")
+        logger_instance.info(f"Dataframe shape: {df.shape}")
+        logger_instance.debug(f"Dataframe columns: {df.columns.tolist()}")
+        logger_instance.debug(f"Sample data:\n{df.head(2)}")
         
         # Create workflow
         workflow = DataAnalysisWorkflow(model_name=model_name)
-        logger.info("✅ Workflow created successfully")
+        logger_instance.info("✅ Workflow created successfully")
         
         # Run analysis
         result = workflow.run_analysis(df, user_query)
-        logger.info("✅ Analysis execution completed")
+        logger_instance.info("✅ Analysis execution completed")
         
         return result
         
     except Exception as e:
-        logger.error(f"Analysis execution failed: {e}")
-        log_exception(logger, "run_analysis function failed")
+        logger_instance.error(f"Analysis execution failed: {e}")
+        log_exception(logger_instance, "run_analysis function failed")
         return {
             "success": False,
             "user_query": user_query,
@@ -356,4 +368,3 @@ def run_analysis(df, user_query: str, model_name: str = 'claude-3-opus-20240229'
             "retry_count": 0,
             "workflow_completed": False
         }
-

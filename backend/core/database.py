@@ -1,14 +1,17 @@
-from sqlalchemy import create_engine, MetaData, text
+import asyncio
+from contextlib import asynccontextmanager
+from pathlib import Path
+from typing import AsyncGenerator, Generator
+from sqlalchemy import create_engine, text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
-from contextlib import asynccontextmanager
-from typing import AsyncGenerator, Generator
-import asyncio
-from pathlib import Path
 
 from core.config import settings
 from core.logger import logger
+
+# Create declarative base
+Base = declarative_base()
 
 # Create database directory if using SQLite
 if settings.DATABASE_TYPE == "sqlite":
@@ -48,10 +51,6 @@ AsyncSessionLocal = async_sessionmaker(
     autocommit=False,
     autoflush=False
 )
-
-# Base class for models
-Base = declarative_base()
-metadata = MetaData()
 
 def get_db() -> Generator[Session, None, None]:
     """Sync database session dependency"""
@@ -238,6 +237,8 @@ async def create_default_templates():
             from services.template_service import TemplateService
             await TemplateService.create_default_templates(db)
             logger.info("✅ Default templates created/verified")
+    except Exception as e:
+        logger.warning(f"Could not create default templates: {e}")
     except Exception as e:
         logger.warning(f"Could not create default templates: {e}")
 

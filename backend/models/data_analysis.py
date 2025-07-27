@@ -58,10 +58,15 @@ class AnalysisState(BaseModel):
     
     # Flow outputs
     classification: Optional[QueryClassification] = None
+    data_extraction: Optional[CodeAnalysis] = None  # NEW: Data extraction step
     code_analysis: Optional[CodeAnalysis] = None
     code_review: Optional[CodeReview] = None
     execution_result: Optional[ExecutionResult] = None
     final_results: Optional[FinalResults] = None
+    
+    # Extracted data (after filtering)
+    extracted_data: Optional[pd.DataFrame] = None  # NEW: Filtered dataset
+    visualization_html: Optional[str] = None  # NEW: Generated HTML content
     
     # Control flow
     current_code: str = ""

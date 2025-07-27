@@ -25,43 +25,7 @@ Focus on the user's intent - do they want to see data or visualize data?
 
 # ===== NODE 2A & 2B: QUERY ANALYSIS & CODE GENERATION =====
 PROMPT_GENERAL_CODE_GENERATION = ChatPromptTemplate.from_template("""
-You are a Python data analysis expert. Generate code for GENERAL data analysis ONLY (NO VISUALIZATION).
-
-User Query: "{user_query}"
-Classification: {classification}
-
-Dataset Info:
-- Shape: {dataset_shape}  
-- Columns: {columns}
-- Data Types: {data_types}
-- Sample: {sample_data}
-
-Generate Python code using ONLY pandas for:
-- Data filtering, aggregation, statistics, calculations
-- Print clear, formatted results to console
-- Handle missing data appropriately
-- Use df as the dataframe variable
-- NO PLOTTING, NO CHARTS, NO VISUALIZATION LIBRARIES
-
-IMPORTANT RESTRICTIONS:
-- DO NOT import plotly, matplotlib, seaborn, or any visualization libraries
-- DO NOT create any plots, charts, or visual outputs
-- DO NOT save any HTML files
-- Output should be TEXT ONLY (print statements, tables, summaries)
-
-Provide structured output:
-- query_understanding: What the user wants (data analysis only)
-- approach: Your solution approach (text-based analysis only)
-- required_columns: List of column names as array (e.g., ["col1", "col2"])
-- generated_code: Complete Python code (pandas only, no visualization)
-- expected_output: What the code will produce (text/numerical results only)
-
-IMPORTANT: required_columns must be a JSON array of strings, not a string representation.
-Focus on providing clear, numerical/textual answers to the user's question.
-""")
-
-PROMPT_VISUALIZATION_CODE_GENERATION = ChatPromptTemplate.from_template("""
-You are a Python visualization expert. Generate code for VISUALIZATION using plotly.
+You are a data analysis expert. Generate Python code for general data analysis (NO VISUALIZATION).
 
 User Query: "{user_query}"
 Classification: {classification}
@@ -70,99 +34,220 @@ Dataset Info:
 - Shape: {dataset_shape}
 - Columns: {columns}
 - Data Types: {data_types}
-- Sample: {sample_data}
+- Sample Data: {sample_data}
 
-Generate Python code using pandas + plotly for:
-- Create interactive visualizations
-- Save as HTML file: 'plots/visualization.html'
-- Create plots directory: os.makedirs('plots', exist_ok=True)
-- Use appropriate chart types (bar, line, scatter, pie, etc.)
-- Include proper titles, labels, and formatting
-- Use df as the dataframe variable
+Generate Python code that:
+1. Performs the requested analysis
+2. Prints clear, formatted results
+3. Does NOT create any visualizations
+4. Uses pandas for data manipulation
+5. Handles edge cases gracefully
 
-Provide structured output:
-- query_understanding: What visualization the user wants
-- approach: Your visualization approach
-- required_columns: List of column names as array (e.g., ["col1", "col2"])
+Requirements:
+- Only use pandas and numpy
+- NO plotting libraries (matplotlib, plotly, seaborn)
+- Focus on statistical analysis, filtering, aggregation
+- Print results with clear headers and formatting
+- Include summary statistics where relevant
+
+Provide structured output with:
+- query_understanding: What the user wants to achieve
+- approach: Your analysis strategy
+- required_columns: Columns needed from the dataset
+- generated_code: Complete Python code
+- expected_output: What the analysis will produce
+""")
+
+PROMPT_VISUALIZATION_CODE_GENERATION = ChatPromptTemplate.from_template("""
+You are a visualization expert. Generate Python code for creating interactive visualizations.
+
+User Query: "{user_query}"
+Classification: {classification}
+
+Dataset Info:
+- Shape: {dataset_shape}
+- Columns: {columns}
+- Data Types: {data_types}
+- Sample Data: {sample_data}
+
+Generate Python code that:
+1. Creates appropriate visualizations for the query
+2. Uses plotly for interactive charts
+3. Saves visualization as HTML file
+4. Handles different chart types based on data
+5. Includes proper titles, labels, and formatting
+
+Chart Selection Guidelines:
+- Pie Chart: For categorical distributions, percentages
+- Bar Chart: For comparisons, counts, rankings
+- Line Chart: For trends, time series
+- Scatter Plot: For relationships between variables
+- Histogram: For data distributions
+
+Requirements:
+- Use plotly.express or plotly.graph_objects
+- Save to 'plots/visualization.html'
+- Include interactive features (tooltips, hover)
+- Handle missing data appropriately
+- Add proper titles and axis labels
+
+Provide structured output with:
+- query_understanding: What visualization is needed
+- approach: Chart type and visualization strategy
+- required_columns: Columns needed for the chart
 - generated_code: Complete Python code with plotly
-- expected_output: Description of the visualization
+- expected_output: Description of the resulting visualization
+""")
 
-IMPORTANT: required_columns must be a JSON array of strings, not a string representation.
+# ===== NEW: DATA EXTRACTION PROMPT =====
+PROMPT_DATA_EXTRACTION = ChatPromptTemplate.from_template("""
+You are a data extraction specialist. Analyze the user query and generate Python code to filter and prepare data for visualization.
+
+User Query: "{user_query}"
+Classification: {classification}
+
+Dataset Info:
+- Shape: {dataset_shape}
+- Columns: {columns}
+- Data Types: {data_types}
+- Sample Data: {sample_data}
+
+Generate Python code that:
+1. Filters the dataset based on user requirements
+2. Handles missing values appropriately
+3. Prepares data structure for visualization
+4. Prints summary of extracted data
+5. Creates variables for chart generation
+
+Requirements:
+- Use pandas for data manipulation
+- Filter only relevant columns and rows
+- Handle edge cases (empty data, missing columns)
+- Prepare data in formats suitable for charts
+- Print clear status messages
+
+Generate structured output with:
+- query_understanding: What data needs to be extracted
+- approach: How you'll filter and prepare the data
+- required_columns: Columns needed from the dataset
+- generated_code: Complete Python code for data extraction
+- expected_output: What the extraction will produce
+""")
+
+# ===== NEW: ECHARTS GENERATION PROMPT =====
+PROMPT_ECHARTS_GENERATION = ChatPromptTemplate.from_template("""
+You are an ECharts visualization expert. Generate JavaScript-based interactive charts using ECharts library.
+
+User Query: "{user_query}"
+Classification: {classification}
+Extracted Data Info: {extracted_data_info}
+
+Dataset Info:
+- Shape: {dataset_shape}
+- Columns: {columns}
+- Data Types: {data_types}
+- Sample Data: {sample_data}
+
+Generate Python code that:
+1. Uses the extracted/filtered data from previous step
+2. Determines appropriate chart type based on user query
+3. Prepares data in ECharts format
+4. Generates complete HTML with ECharts visualization
+5. Saves HTML file for frontend rendering
+
+Chart Type Selection Logic:
+- Pie Chart: For distribution, percentage, composition queries
+- Bar Chart: For comparison, counting, ranking queries
+- Line Chart: For trends, time series, correlation queries
+- Scatter Plot: For relationship, correlation analysis
+- Heatmap: For correlation matrix, density analysis
+
+ECharts Features to Include:
+- Interactive tooltips
+- Responsive design
+- Professional styling
+- Legend and axis labels
+- Animation effects
+- Zoom and pan capabilities
+
+Generate structured output with:
+- query_understanding: What type of visualization is needed
+- approach: Chart type and ECharts configuration strategy
+- required_columns: Columns needed for the visualization
+- generated_code: Complete Python code that generates ECharts HTML
+- expected_output: Description of the interactive chart
+
+IMPORTANT: 
+- Generate complete HTML with embedded ECharts CDN
+- Use modern ECharts v5+ features
+- Ensure charts are mobile-responsive
+- Include proper error handling
+- Save to 'charts/visualization.html' path
 """)
 
 # ===== NODE 3: CODE REVIEW =====
 PROMPT_CODE_REVIEW = ChatPromptTemplate.from_template("""
-You are a Python code reviewer. Review this code to ensure it correctly fulfills the user's query.
+You are a code reviewer specializing in data analysis. Review the generated code for correctness and safety.
 
 User Query: "{user_query}"
-Generated Code:
-```python
-{generated_code}
-```
-
-Code Analysis Context: {code_analysis}
+Generated Code: {generated_code}
+Code Analysis: {code_analysis}
 
 Review the code for:
-1. Does it correctly address the user's query?
-2. Are there any syntax or logic errors?
-3. Will it produce the expected output?
-4. Is error handling adequate?
-5. Are required libraries imported?
+1. Correctness - Does it fulfill the user's request?
+2. Safety - No harmful operations or file access
+3. Efficiency - Reasonable performance expectations
+4. Error handling - Graceful handling of edge cases
+5. Best practices - Clean, readable code
 
-Provide structured review:
-- is_correct: true if code correctly fulfills user query
+Provide structured review with:
+- is_correct: Boolean indicating if code is correct
 - review_status: "approved" or "needs_rewrite"
-- issues: Array of issue strings (e.g., ["issue1", "issue2"])
-- suggestions: Array of suggestion strings (e.g., ["suggestion1", "suggestion2"])
+- issues: List of specific problems found
+- suggestions: List of improvement recommendations
 - confidence: Your confidence in the review (0-1)
-
-IMPORTANT: issues and suggestions must be JSON arrays of strings, not single strings or bullet points.
-Be strict - only approve if the code will definitely work and answer the user's question.
 """)
 
 # ===== NODE 4: CODE REWRITE =====
 PROMPT_CODE_REWRITE = ChatPromptTemplate.from_template("""
-The previous code had issues. Rewrite it to correctly fulfill the user query.
+You are a code improvement expert. Rewrite the code based on review feedback.
 
 User Query: "{user_query}"
-Previous Code:
-```python
-{previous_code}
-```
-
+Previous Code: {previous_code}
 Review Issues: {review_issues}
-Suggestions: {review_suggestions}
+Review Suggestions: {review_suggestions}
 
 Dataset Info:
 - Shape: {dataset_shape}
 - Columns: {columns}
 - Data Types: {data_types}
 
-Rewrite the code addressing all issues. Provide structured output:
-- query_understanding: Clarified understanding
-- approach: Improved approach
-- required_columns: List of column names as array (e.g., ["col1", "col2"])
-- generated_code: Fixed/rewritten code
-- expected_output: What the new code will produce
+Rewrite the code to address all issues while maintaining the original intent.
 
-IMPORTANT: required_columns must be a JSON array of strings, not a string representation.
-Ensure the rewritten code is correct and will work properly.
+Provide structured output with:
+- query_understanding: Updated understanding of requirements
+- approach: Improved approach addressing the issues
+- required_columns: Columns needed from dataset
+- generated_code: Rewritten and improved Python code
+- expected_output: What the improved code will produce
 """)
 
 # ===== NODE 5: FINAL RESULTS =====
 PROMPT_FINAL_RESULTS = ChatPromptTemplate.from_template("""
-Generate final results summary for the completed data analysis.
+You are a results summarizer. Create a final summary of the analysis.
 
 User Query: "{user_query}"
 Execution Result: {execution_result}
 Query Type: {query_type}
 
-Create a comprehensive final result:
-- answer: Direct answer to user's question
-- summary: What analysis was performed
-- visualization_info: Details about any charts created
-- success: Whether the analysis was successful
+Based on the execution results, provide a comprehensive summary:
 
-Make the answer clear, actionable, and user-friendly.
+Provide structured output with:
+- answer: Direct answer to the user's question
+- summary: Summary of what was accomplished
+- visualization_info: Details about any charts created (if applicable)
+- success: Whether the analysis was successful
+- Include proper error handling
+- Save to 'charts/visualization.html' path
 """)
 
