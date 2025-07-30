@@ -88,10 +88,10 @@ class ChartType(str, Enum):
     VIOLIN = "violin"
     AREA = "area"
     BUBBLE = "bubble"
-
+    RADAR = "radar"
 class DataAnalysisRequest(BaseModel):
     prompt: str
-    model: Optional[str] = "claude-3-opus-20240229"  # Add default model
+    model: Optional[str] = "claude-opus-4-20250514"  # Add default model
     enable_code_review: Optional[bool] = True
 
 class ChartGenerationResponse(BaseModel):
@@ -129,7 +129,7 @@ class AnalysisListResponse(BaseModel):
     is_visible: bool  # NEW: Visibility status
     template_name: Optional[str] = None
     combine_sheets: bool = False  # Whether to combine multiple sheets
-    model: Optional[str] = "claude-3-opus-20240229"
+    model: Optional[str] = "claude-opus-4-20250514"
 
 class AnalysisCapabilitiesResponse(BaseModel):
     success: bool

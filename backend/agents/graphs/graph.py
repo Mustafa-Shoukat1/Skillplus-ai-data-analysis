@@ -16,7 +16,7 @@ from core.logger import logger, log_exception
 class DataAnalysisWorkflow:
     """Optimized data analysis workflow with structured output and reliable error handling"""
     
-    def __init__(self, model_name: str = 'claude-3-opus-20240229', temperature: float = 0):
+    def __init__(self, model_name: str = 'claude-opus-4-20250514', temperature: float = 0):
         self.logger = logging.getLogger(__name__)
         
         # Set the API key for Anthropic
@@ -285,7 +285,7 @@ class DataAnalysisWorkflow:
         }
 
 # Convenience function with enhanced error handling
-def run_analysis(df, user_query: str, model_name: str = 'claude-3-opus-20240229') -> dict:
+def run_analysis(df, user_query: str, model_name: str = 'claude-opus-4-20250514') -> dict:
     """Run optimized analysis with structured output and enhanced reliability"""
     logger = logging.getLogger(__name__)
     

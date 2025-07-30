@@ -111,7 +111,7 @@ export const startAnalysis = async (fileId: string, prompt: string): Promise<Api
       credentials: 'include',
       body: JSON.stringify({
         prompt: prompt,
-        model: "claude-3-opus-20240229",
+        model: "claude-opus-4-20250514",
         enable_code_review: true
       }),
     })
@@ -498,7 +498,7 @@ export const bulkAnalyzeWithTemplates = async (fileId: string, templateIds: numb
       body: JSON.stringify({
         file_id: fileId,
         template_ids: templateIds,
-        model: 'claude-3-opus-20240229',
+        model: 'claude-opus-4-20250514',
         enable_code_review: true
       }),
     })

@@ -50,7 +50,7 @@ class TemplateUsageStats(BaseModel):
 class BulkAnalysisRequest(BaseModel):
     file_id: str
     template_ids: List[int] = Field(..., min_items=1, max_items=10)
-    model: Optional[str] = "claude-3-opus-20240229"
+    model: Optional[str] = "claude-opus-4-20250514"
     enable_code_review: Optional[bool] = True
 
 class BulkAnalysisResponse(BaseModel):
