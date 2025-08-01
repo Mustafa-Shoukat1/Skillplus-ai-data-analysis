@@ -1,10 +1,11 @@
-  "use client"
+"use client"
 
 import { useState, useEffect } from "react"
 import ProfessionalHeader from "@/components/professional-header"
 import AdminDashboard from "@/components/admin-dashboard"
 import ViewerDashboard from "@/components/viewer-dashboard"
 import LoginForm from "@/components/login-form"
+import PlatformSelection from "@/components/platform-selection"
 
 // Initial users with proper structure
 const INITIAL_USERS = [
@@ -53,6 +54,8 @@ const INITIAL_USERS = [
 export default function Home() {
   const [user, setUser] = useState<any>(null)
   const [loading, setLoading] = useState(true)
+  const [showPlatformSelection, setShowPlatformSelection] = useState(false)
+  const [selectedPlatform, setSelectedPlatform] = useState<string | null>(null)
   const [csvData, setCsvData] = useState<any[]>([])
   const [analyses, setAnalyses] = useState<any[]>([])
   const [users, setUsers] = useState(INITIAL_USERS)
@@ -60,8 +63,16 @@ export default function Home() {
   useEffect(() => {
     // Check if user is already logged in
     const savedUser = localStorage.getItem("currentUser")
+    const savedPlatform = localStorage.getItem("selectedPlatform")
+    
     if (savedUser) {
       setUser(JSON.parse(savedUser))
+      if (savedPlatform) {
+        setSelectedPlatform(savedPlatform)
+        setShowPlatformSelection(false)
+      } else {
+        setShowPlatformSelection(true)
+      }
     }
 
     // Load saved users
@@ -90,6 +101,7 @@ export default function Home() {
     if (userData) {
       const userSession = { username: userData.username, role: userData.role, name: userData.name }
       setUser(userSession)
+      setShowPlatformSelection(true) // Show platform selection after login
       localStorage.setItem("currentUser", JSON.stringify(userSession))
       return true
     }
@@ -98,7 +110,24 @@ export default function Home() {
 
   const handleLogout = () => {
     setUser(null)
+    setShowPlatformSelection(false)
+    setSelectedPlatform(null)
     localStorage.removeItem("currentUser")
+    localStorage.removeItem("selectedPlatform")
+  }
+
+  const handleSelectPlatform = (platform: 'skillpulse' | 'feedbackpulse') => {
+    setSelectedPlatform(platform)
+    setShowPlatformSelection(false)
+    localStorage.setItem("selectedPlatform", platform)
+  }
+
+  const handleBackToLogin = () => {
+    setUser(null)
+    setShowPlatformSelection(false)
+    setSelectedPlatform(null)
+    localStorage.removeItem("currentUser")
+    localStorage.removeItem("selectedPlatform")
   }
 
   const handleDataLoaded = (employees: any[], departments: string[], analytics: any) => {
@@ -179,6 +208,16 @@ export default function Home() {
 
   if (!user) {
     return <LoginForm onLogin={handleLogin} />
+  }
+
+  if (showPlatformSelection) {
+    return (
+      <PlatformSelection 
+        user={user}
+        onSelectPlatform={handleSelectPlatform}
+        onBackToLogin={handleBackToLogin}
+      />
+    )
   }
 
   return (
