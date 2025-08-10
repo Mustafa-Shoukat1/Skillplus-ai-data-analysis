@@ -1,7 +1,8 @@
 from datetime import datetime
 from enum import Enum
-from typing import List, Dict, Any, Optional, Literal
-from pydantic import BaseModel, Field
+import operator
+from typing import Annotated, List, Dict, Any, Optional, Literal, Sequence, TypedDict
+from pydantic import BaseModel, Field, field_validator
 import pandas as pd
 
 # ===== PYDANTIC MODELS FOR SIMPLE FLOW =====
@@ -91,45 +92,71 @@ class ChartType(str, Enum):
     RADAR = "radar"
 class DataAnalysisRequest(BaseModel):
     prompt: str
-    model: Optional[str] = "claude-opus-4-20250514"  # Add default model
+
+    # Model selection used by backend services when saving/executing
+    model: Optional[str] = "claude-3-7-sonnet-20250219"
+
+    # New inputs coming from Next.js frontend
+    graph_type: Optional[str] = None
+    sheet: Optional[str] = None
+    echart_sample_code: Optional[str] = None
     enable_code_review: Optional[bool] = True
 
 class ChartGenerationResponse(BaseModel):
     success: bool
-    chart_base64: Optional[str] = None
-    chart_html: Optional[str] = None
-    insights: List[str] = []
-    generated_code: Optional[str] = None
-    analysis_summary: Optional[str] = None
-    query_analysis: Optional[Dict[str, Any]] = None
-    data_analysis: Optional[Dict[str, Any]] = None
+
     execution_result: Optional[Dict[str, Any]] = None
     error_message: Optional[str] = None
     analysis_id: Optional[str] = None
     is_visible: Optional[bool] = True  # NEW: Visibility toggle
+    # Agent/LCEL additions
+    echart_code: Optional[str] = None
+    designed_echart_code: Optional[str] = None
+    response_df_records: List[Dict[str, Any]] = []
+    response_df_columns: List[str] = []
+    response_df_shape: Optional[tuple] = None
+    agent_state: Optional[Dict[str, Any]] = None
+
+class MinimalAnalysisResponse(BaseModel):
+    """Minimal API response for analysis results"""
+    query: str
+    echart_code: Optional[str] = None
+    designed_echart_code: Optional[str] = None
+    response_df: List[Dict[str, Any]] = []
+
+    @field_validator("response_df", mode="before")
+    @classmethod
+    def ensure_list_of_dicts(cls, v):
+        if isinstance(v, dict):
+            import pandas as pd
+            return pd.DataFrame(v).to_dict('records')
+        elif hasattr(v, 'to_dict'):
+            return v.to_dict('records')
+        elif not isinstance(v, list):
+            return []
+        return v
+
+    model_config = {
+        "arbitrary_types_allowed": True
+    }
 
 class AnalysisVisibilityUpdate(BaseModel):
     """Model for updating analysis visibility"""
     is_visible: bool
 
 class AnalysisListResponse(BaseModel):
-    """Enhanced analysis list response with visibility info"""
+    """Simplified analysis list response"""
     analysis_id: str
     database_id: int
-    user_query: str
-    success: bool
-    query_type: str
-    processing_time: Optional[float]
-    model_used: Optional[str]
+    query: str
+    echart_code: Optional[str] = None
+    designed_echart_code: Optional[str] = None
+    response_df: List[Dict[str, Any]] = []
     created_at: datetime
-    completed_at: Optional[datetime]
-    visualization_created: bool
-    final_answer: Optional[str]
-    summary: Optional[str]
-    is_visible: bool  # NEW: Visibility status
-    template_name: Optional[str] = None
-    combine_sheets: bool = False  # Whether to combine multiple sheets
-    model: Optional[str] = "claude-opus-4-20250514"
+    is_active: bool = True
+    
+    class Config:
+        from_attributes = True
 
 class AnalysisCapabilitiesResponse(BaseModel):
     success: bool
@@ -158,3 +185,87 @@ class DataPreviewResponse(BaseModel):
     shape: Optional[tuple] = None
     data_types: Dict[str, str] = {}
     error_message: Optional[str] = None
+
+
+# ---------------------------------------------------------------------
+# Structured Output Models
+# ---------------------------------------------------------------------
+class AnalysisClassification(BaseModel):
+    """Classification of user query analysis type"""
+    analysis_type: Literal["skill", "gap", "count", "summary", "comparison", "unknown"] = Field(
+        description="Type of analysis requested"
+    )
+    confidence: float = Field(
+        description="Confidence score between 0 and 1",
+        ge=0.0, le=1.0
+    )
+    reasoning: str = Field(description="Brief explanation of classification")
+    suggested_sheet: Optional[str] = Field(
+        description="Suggested sheet for analysis based on query",
+        default=None
+    )
+
+class CodeGenerationResult(BaseModel):
+    """Result of code generation"""
+    code: str = Field(description="Generated Python code")
+    description: str = Field(description="What the code does")
+    expected_output: str = Field(description="Expected type of output")
+    imports_needed: List[str] = Field(description="Required imports", default_factory=list)
+
+class CodeReviewResult(BaseModel):
+    """Result of code review"""
+    approved: bool = Field(description="Whether code is approved")
+    feedback: str = Field(description="Review feedback")
+    issues: List[str] = Field(description="List of specific issues found", default_factory=list)
+    suggestions: List[str] = Field(description="Improvement suggestions", default_factory=list)
+    severity: Literal["low", "medium", "high", "critical"] = Field(
+        description="Severity of issues found",
+        default="low"
+    )
+
+class AnalysisResult(BaseModel):
+    """Final analysis result"""
+    summary: str = Field(description="Executive summary of findings")
+    key_insights: List[str] = Field(description="Key insights discovered")
+    metrics: Dict[str, Any] = Field(description="Quantitative metrics", default_factory=dict)
+    recommendations: List[str] = Field(description="Actionable recommendations")
+    data_quality_notes: List[str] = Field(description="Data quality observations", default_factory=list)
+    methodology: str = Field(description="Analysis methodology used")
+
+# ---------------------------------------------------------------------
+# Improved State with Better Typing
+# ---------------------------------------------------------------------
+class AgentState(TypedDict):
+    messages: Annotated[Sequence[str], operator.add]
+    analysis_classification: Optional[AnalysisClassification]
+    analysis_type: str
+    sheet: Optional[str]
+    df: Optional[pd.DataFrame]
+    # Unified tabular response for downstream processing
+    response_df: Optional[pd.DataFrame]
+    code_generation_result: Optional[CodeGenerationResult]
+    code_review_result: Optional[CodeReviewResult]
+    analysis_result: Optional[AnalysisResult]
+    execution_result: Optional[Dict[str, Any]]
+    response: Dict[str, Any]
+    # Global sheet data
+    sheets: Dict[str, pd.DataFrame]
+    selected_sheets: Dict[str, pd.DataFrame]
+    dfs_list: List[pd.DataFrame]
+    sheets_metadata: List[Dict[str, Any]]
+    total_sheets: int
+    columns: List[str]
+    shapes: List[tuple]
+    data_types: Dict[str, str]
+    # Enhanced retry tracking
+    review_attempts: int
+    max_review_attempts: int
+    error_log: List[str]
+    # ECharts integration
+    graph_type: Optional[str]
+    echart_code: Optional[str]
+    # ECharts sample/template merging
+    echart_sample_code: Optional[str]
+    designed_echart_code: Optional[str]
+    enhanced_echart_options: Optional[str]
+    #

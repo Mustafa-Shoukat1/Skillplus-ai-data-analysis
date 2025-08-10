@@ -95,7 +95,16 @@ export const listFiles = async (): Promise<ApiResponse> => {
 }
 
 // Analysis APIs
-export const startAnalysis = async (fileId: string, prompt: string): Promise<ApiResponse> => {
+export const startAnalysis = async (
+  fileId: string,
+  prompt: string,
+  options?: {
+    graphType?: string
+    sheet?: string
+    echartSampleCode?: string
+    model?: string
+  }
+): Promise<ApiResponse> => {
   try {
     console.log("API: Starting analysis request...")
     console.log("API: File ID:", fileId)
@@ -110,9 +119,11 @@ export const startAnalysis = async (fileId: string, prompt: string): Promise<Api
       },
       credentials: 'include',
       body: JSON.stringify({
-        prompt: prompt,
-        model: "claude-opus-4-20250514",
-        enable_code_review: true
+        prompt,
+        model: options?.model,
+        graph_type: options?.graphType,
+        sheet: options?.sheet,
+        echart_sample_code: options?.echartSampleCode,
       }),
     })
 
@@ -498,8 +509,7 @@ export const bulkAnalyzeWithTemplates = async (fileId: string, templateIds: numb
       body: JSON.stringify({
         file_id: fileId,
         template_ids: templateIds,
-        model: 'claude-opus-4-20250514',
-        enable_code_review: true
+        enable_code_review: true,
       }),
     })
 

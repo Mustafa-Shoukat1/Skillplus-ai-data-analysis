@@ -1,5 +1,6 @@
 import asyncio
 import os
+from langchain_anthropic.chat_models import ChatAnthropic
 import pandas as pd
 import time
 from datetime import datetime
@@ -12,7 +13,7 @@ from pathlib import Path
 
 from models.database import UploadedFile, AnalysisResult, User
 from models.data_analysis import DataAnalysisRequest, ChartGenerationResponse
-from agents.graphs.graph import run_analysis
+# Replaced legacy graph with new LCEL workflow in route/service implementations
 from core.database import get_async_db
 from core.logger import logger, log_exception, log_function_entry, log_function_exit, log_data_info
 
@@ -43,20 +44,16 @@ class DataAnalysisService:
         analysis_data: Dict[str, Any],
         processing_time: float,
         model_used: str,
-        analysis_id: str = None  # Accept pre-generated analysis_id
+        analysis_id: str = None
     ) -> AnalysisResult:
-        """Save analysis result to database with improved data extraction"""
+        """Save analysis result to database with simplified model"""
         
         logger.info(f"Saving analysis result to database...")
         
-        # ALWAYS use provided analysis_id if given, otherwise generate one
+        # Use provided analysis_id or generate one
         if analysis_id:
             logger.info(f"Using provided analysis_id: {analysis_id}")
-            # Validate that it has the correct format
-            if not analysis_id.startswith("analysis_") and not analysis_id.startswith("temp_"):
-                logger.warning(f"⚠️ Analysis ID doesn't have expected format: {analysis_id}")
         else:
-            # Generate unique analysis ID with consistent format
             import uuid
             import time
             timestamp = int(time.time())
@@ -64,150 +61,47 @@ class DataAnalysisService:
             analysis_id = f"analysis_{timestamp}_{unique_suffix}"
             logger.info(f"Generated new analysis_id: {analysis_id}")
         
-        # Helper function to safely extract data from Pydantic objects or dicts
-        def safe_extract_dict(obj, default=None):
-            if obj is None:
-                return default or {}
-            if hasattr(obj, 'model_dump'):
-                return obj.model_dump()
-            elif isinstance(obj, dict):
-                return obj
-            else:
-                logger.warning(f"Unexpected object type for extraction: {type(obj)}")
-                return default or {}
+        # Extract essential data from analysis_data
+        echart_code = analysis_data.get("echart_code")
+        designed_echart_code = analysis_data.get("designed_echart_code")
+        response_df = analysis_data.get("response_df")
+        
+        # Convert DataFrame to JSON if it's a DataFrame
+        response_df_json = None
+        if response_df is not None:
+            if hasattr(response_df, 'to_dict'):
+                # Always convert to records (list of dicts)
+                response_df_json = response_df.to_dict('records')
+            elif isinstance(response_df, dict):
+                # Convert dict-of-columns to list of dicts (records)
+                import pandas as pd
+                response_df_json = pd.DataFrame(response_df).to_dict('records')
+            elif isinstance(response_df, list):
+                response_df_json = response_df
         
         try:
-            # Extract data with improved error handling
-            classification_data = safe_extract_dict(analysis_data.get("classification"), {})
-            analysis_code_data = safe_extract_dict(analysis_data.get("analysis"), {})
-            execution_data = safe_extract_dict(analysis_data.get("execution"), {})
-            final_results_data = safe_extract_dict(analysis_data.get("final_results"), {})
-            
-            # Determine query type - FIXED to handle both enum and string values
-            query_type = classification_data.get("query_type", "unknown")
-            
-            # Handle both enum values and string values
-            if hasattr(query_type, 'value'):
-                query_type_str = query_type.value  # Extract string from enum
-            else:
-                query_type_str = str(query_type).lower()
-            
-            is_visualization_query = query_type_str == "visualization"
-            
-            logger.info(f"Query type: {query_type_str}, Is visualization: {is_visualization_query}")
-            
-            # Handle visualization HTML content - ONLY for visualization queries
-            visualization_html = None
-            
-            if is_visualization_query:
-                logger.info("Processing visualization query - checking for HTML content")
-                
-                # Method 1: Check execution results for file paths
-                if execution_data.get("visualization_created") and execution_data.get("file_paths"):
-                    for file_path in execution_data.get("file_paths", []):
-                        if file_path.endswith('.html'):
-                            try:
-                                logger.info(f"Attempting to read visualization file: {file_path}")
-                                with open(file_path, 'r', encoding='utf-8') as f:
-                                    visualization_html = f.read()
-                                logger.info(f"Successfully read {len(visualization_html)} characters from {file_path}")
-                                break
-                            except Exception as e:
-                                logger.warning(f"Could not read visualization file {file_path}: {e}")
-                
-                # Method 2: Check standard plots directory (for all visualization queries)
-                if not visualization_html:
-                    plots_dir = os.path.abspath('plots')
-                    html_file = os.path.join(plots_dir, 'visualization.html')
-                    if os.path.exists(html_file):
-                        try:
-                            with open(html_file, 'r', encoding='utf-8') as f:
-                                visualization_html = f.read()
-                            logger.info(f"Read visualization HTML from standard location: {len(visualization_html)} characters")
-                        except Exception as e:
-                            logger.warning(f"Could not read from standard location {html_file}: {e}")
-                    else:
-                        logger.warning(f"No HTML file found at: {html_file}")
-                
-                # Method 3: Check if HTML is already in analysis_data
-                if not visualization_html and analysis_data.get("visualization_html"):
-                    visualization_html = analysis_data["visualization_html"]
-                    logger.info(f"Found HTML in analysis data: {len(visualization_html)} characters")
-                    
-            else:
-                logger.info(f"Skipping visualization HTML detection for {query_type_str} query")
-            
-            # Create database record with the analysis_id (provided or generated)
             db_result = AnalysisResult(
-                analysis_id=analysis_id,  # Use the analysis_id as provided/generated
-                user_query=user_query,
-                success=analysis_data.get("success", False),
-                
-                # Classification data - with detailed extraction
-                query_type=query_type_str,  # Store as string
-                classification_reasoning=classification_data.get("reasoning"),
-                user_intent=classification_data.get("user_intent"),
-                requires_data_filtering=classification_data.get("requires_data_filtering"),
-                classification_confidence=classification_data.get("confidence"),
-                
-                # Code analysis data - with detailed extraction
-                query_understanding=analysis_code_data.get("query_understanding"),
-                approach=analysis_code_data.get("approach"),
-                required_columns=analysis_code_data.get("required_columns", []),
-                generated_code=analysis_data.get("generated_code") or analysis_code_data.get("generated_code"),
-                expected_output=analysis_code_data.get("expected_output"),
-                
-                # Execution data - with detailed extraction
-                execution_success=execution_data.get("success"),
-                execution_output=execution_data.get("output"),
-                visualization_created=execution_data.get("visualization_created", False),
-                file_paths=execution_data.get("file_paths", []),
-                
-                # Final results data - with detailed extraction
-                final_answer=final_results_data.get("answer"),
-                summary=final_results_data.get("summary"),
-                visualization_info=final_results_data.get("visualization_info"),
-                
-                # Visualization HTML content
-                visualization_html=visualization_html,
-                
-                # Metadata
-                retry_count=analysis_data.get("retry_count", 0),
-                processing_time=processing_time,
-                model_used=model_used,
-                
-                # Foreign keys
+                analysis_id=analysis_id,
                 user_id=user_id,
                 file_id=file_id,
-                completed_at=datetime.now()
+                query=user_query,
+                echart_code=echart_code,
+                designed_echart_code=designed_echart_code,
+                response_df=response_df_json,
+                is_active=True
             )
             
-            # Log what we're saving
-            logger.info(f"Saving to DB with analysis_id: {analysis_id}")
-            logger.info(f"Generated code length: {len(db_result.generated_code) if db_result.generated_code else 0}")
-            logger.info(f"Visualization HTML length: {len(visualization_html) if visualization_html else 0}")
-            
-            # Add to database session
             db.add(db_result)
             await db.commit()
             await db.refresh(db_result)
             
-            logger.info(f"✅ Analysis result saved with analysis_id: {db_result.analysis_id}")
-            
-            # Verify the ID was saved correctly
-            if db_result.analysis_id != analysis_id:
-                logger.error(f"❌ CRITICAL: Database saved different ID than expected!")
-                logger.error(f"Expected: {analysis_id}")
-                logger.error(f"Got: {db_result.analysis_id}")
-                # This should never happen, but log it as critical
-            
+            logger.info(f"Analysis result saved successfully with ID: {analysis_id}")
             return db_result
             
-        except Exception as save_exception:
-            logger.error(f"❌ Failed to save analysis result: {save_exception}")
-            log_exception(logger, "Database save exception", save_exception)
+        except Exception as e:
+            logger.error(f"Failed to save analysis result: {e}")
             await db.rollback()
-            raise save_exception
+            raise e
 
     @staticmethod
     async def get_analysis_by_analysis_id(
@@ -279,118 +173,51 @@ class DataAnalysisService:
                 logger.info(f"📂 Loading data from: {file_obj.file_path}")
                 
                 try:
-                    dfs_list = []  # List of DataFrames
-                    dfs_metadata = []  # Metadata for each DataFrame
-                    
-                    if file_obj.file_type.lower() in ['.xlsx', '.xls']:
-                        logger.info("📊 Processing Excel file with skiprows=4 for all sheets")
-                        
-                        try:
-                            # Read all sheets with skiprows=4
-                            logger.debug("Reading Excel sheets...")
-                            sheets = pd.read_excel(file_obj.file_path, sheet_name=None, skiprows=4)
-                            logger.info(f"📋 Found {len(sheets)} sheets: {list(sheets.keys())}")
-                            
-                            if not sheets:
-                                raise Exception("No readable sheets found in Excel file")
-                            
-                            # Process each sheet as separate DataFrame
-                            for sheet_name, sheet_df in sheets.items():
-                                try:
-                                    logger.info(f"🔄 Processing sheet '{sheet_name}': {sheet_df.shape}")
-                                    log_data_info(logger, sheet_df, f"sheet_{sheet_name}")
-                                    
-                                    # Clean the dataframe with logging
-                                    original_shape = sheet_df.shape
-                                    logger.debug(f"Original shape: {original_shape}")
-                                    
-                                    sheet_df = sheet_df.dropna(how='all').dropna(axis=1, how='all')
-                                    logger.debug(f"After cleanup shape: {sheet_df.shape}")
-                                    
-                                    if not sheet_df.empty:
-                                        dfs_list.append(sheet_df)
-                                        
-                                        # Create metadata for this DataFrame
-                                        df_metadata = {
-                                            "sheet_name": sheet_name,
-                                            "sheet_index": len(dfs_list) - 1,
-                                            "shape": sheet_df.shape,
-                                            "columns": sheet_df.columns.tolist(),
-                                            "data_types": {str(col): str(dtype) for col, dtype in sheet_df.dtypes.items()},
-                                            "numeric_columns": sheet_df.select_dtypes(include=['number']).columns.tolist(),
-                                            "categorical_columns": sheet_df.select_dtypes(include=['object']).columns.tolist(),
-                                            "null_counts": sheet_df.isnull().sum().to_dict(),
-                                            "memory_usage": int(sheet_df.memory_usage(deep=True).sum()),
-                                            "source_file": file_obj.original_filename,
-                                            "processing_method": "skiprows_4"
-                                        }
-                                        dfs_metadata.append(df_metadata)
-                                        
-                                        logger.info(f"✅ Loaded sheet '{sheet_name}': {sheet_df.shape}")
-                                    else:
-                                        logger.warning(f"⚠️ Sheet '{sheet_name}' is empty after cleaning")
-                                        
-                                except Exception as sheet_error:
-                                    logger.error(f"❌ Could not load sheet '{sheet_name}'")
-                                    log_exception(logger, f"Sheet processing error for {sheet_name}", sheet_error)
-                            
-                            if not dfs_list:
-                                raise Exception("No valid data found in any sheet")
-                            
-                            # For primary analysis, use the largest DataFrame
-                            primary_df = max(dfs_list, key=len)
-                            primary_sheet_name = dfs_metadata[dfs_list.index(primary_df)]["sheet_name"]
-                            
-                            logger.info(f"🎯 Using '{primary_sheet_name}' as primary DataFrame for analysis: {primary_df.shape}")
-                            log_data_info(logger, primary_df, "primary_dataframe")
-                            
-                        except Exception as excel_error:
-                            logger.error("❌ Excel file processing failed")
-                            log_exception(logger, "Excel processing error", excel_error)
-                            raise
-                        
-                    else:
-                        # CSV file processing - single DataFrame in list
-                        logger.info("📄 Processing CSV file")
-                        
-                        try:
-                            df = pd.read_csv(file_obj.file_path)
-                            logger.info(f"📊 CSV loaded: {df.shape}")
-                            log_data_info(logger, df, "csv_dataframe")
-                            
-                            # Minimal cleanup
-                            original_shape = df.shape
-                            df = df.dropna(how='all').dropna(axis=1, how='all')
-                            logger.info(f"📊 After cleanup: {df.shape} (was {original_shape})")
-                            
-                            dfs_list = [df]
-                            
-                            # Create metadata for CSV DataFrame
-                            df_metadata = {
-                                "sheet_name": "main",
-                                "sheet_index": 0,
-                                "shape": df.shape,
-                                "columns": df.columns.tolist(),
-                                "data_types": {str(col): str(dtype) for col, dtype in df.dtypes.items()},
-                                "numeric_columns": df.select_dtypes(include=['number']).columns.tolist(),
-                                "categorical_columns": df.select_dtypes(include=['object']).columns.tolist(),
-                                "null_counts": df.isnull().sum().to_dict(),
-                                "memory_usage": int(df.memory_usage(deep=True).sum()),
-                                "source_file": file_obj.original_filename,
-                                "processing_method": "standard_csv"
-                            }
-                            dfs_metadata = [df_metadata]
-                            
-                            primary_df = df
-                            primary_sheet_name = "main"
-                            
-                        except Exception as csv_error:
-                            logger.error("❌ CSV file processing failed")
-                            log_exception(logger, "CSV processing error", csv_error)
-                            raise
-                    
-                    logger.info(f"✅ Data loaded successfully. Total DataFrames: {len(dfs_list)}, Primary DataFrame shape: {primary_df.shape}")
-                    logger.debug(f"DataFrames metadata: {[meta['sheet_name'] for meta in dfs_metadata]}")
+                    sheets = pd.read_excel(file_obj.file_path, sheet_name=None, skiprows=4)
+
+                    # Get sheet names as a list
+                    sheet_names = list(sheets.keys())
+
+                    # Select sheets 2, 3, 4, and 5 (index 1 to 4)
+                    selected_sheets = {name: sheets[name] for name in sheet_names[1:5]}
+
+                    # List of DataFrames
+                    dfs_list = list(selected_sheets.values())
+
+                    # Total number of sheets selected
+                    total_sheets = len(dfs_list)
+
+                    # Metadata: list of dicts with sheet name, shape, and columns
+                    sheets_metadata = [
+                        {
+                            "sheet_name": name,
+                            "shape": df.shape,
+                            "columns": list(df.columns),
+                            "data_types": dict(df.dtypes.astype(str))
+                        }
+                        for name, df in selected_sheets.items()
+                    ]
+
+                    # Columns from the first selected sheet
+                    columns = list(dfs_list[0].columns) if dfs_list else []
+
+                    # Shapes of all selected sheets
+                    shapes = [df.shape for df in dfs_list]
+
+                    # Data types from the first selected sheet
+                    data_types = dict(dfs_list[0].dtypes.astype(str)) if dfs_list else {}
+
+                    loading_data={
+                        "sheets": sheets,
+                        "selected_sheets": selected_sheets,
+                        "dfs_list": dfs_list,
+                        "sheets_metadata": sheets_metadata,
+                        "total_sheets": total_sheets,
+                        "columns": columns,
+                        "shapes": shapes,
+                        "data_types": data_types
+                    }
+                    logger.info(f"✅ Data loaded successfully. Total DataFrames: {len(dfs_list)}")  
                     
                 except Exception as file_load_error:
                     logger.error(f"❌ Failed to load file {file_obj.file_path}")
@@ -399,43 +226,55 @@ class DataAnalysisService:
                 
                 result_storage[task_id]["progress"] = 25
                 
-                # Run analysis with enhanced logging
-                logger.info(f"🤖 Starting AI workflow analysis with primary DataFrame...")
+                # Run analysis using LCEL workflow with initial state from frontend-compatible inputs
+                logger.info(f"🤖 Starting LCEL workflow analysis with primary DataFrame...")
                 analysis_start_time = time.time()
-                
+
                 if not request.prompt or len(request.prompt.strip()) < 10:
                     logger.error(f"❌ Invalid prompt: '{request.prompt}' (length: {len(request.prompt) if request.prompt else 0})")
                     raise HTTPException(status_code=400, detail="Prompt is too short or empty")
-                
-                # Enhanced prompt with DataFrames information
-                try:
-                    enhanced_prompt = f"""
-{request.prompt}
 
-AVAILABLE DATAFRAMES INFORMATION:
-- Total DataFrames: {len(dfs_list)}
-- Primary DataFrame: '{primary_sheet_name}' (Shape: {primary_df.shape})
-"""
-                    if len(dfs_list) > 1:
-                        enhanced_prompt += "\n- Additional DataFrames available:\n"
-                        for i, meta in enumerate(dfs_metadata):
-                            if meta['sheet_name'] != primary_sheet_name:
-                                enhanced_prompt += f"  * '{meta['sheet_name']}' (Shape: {meta['shape']}, Columns: {len(meta['columns'])})\n"
-                    
-                    logger.info(f"📝 Enhanced prompt length: {len(enhanced_prompt)} characters")
-                    logger.debug(f"Enhanced prompt preview: {enhanced_prompt[:200]}...")
-                    
-                    # Run analysis
-                    analysis_result = await asyncio.get_event_loop().run_in_executor(
-                        None, run_analysis, primary_df, enhanced_prompt, request.model
-                    )
-                    
+                try:
+                    from agents.graphs.lcel_workflow import DataAnalysisWorkflow
+
+                    # Build initial AgentState-compatible dict
+                    initial_state = {
+                        "messages": [request.prompt],
+                        "analysis_type": "",
+                        "sheet": request.sheet,
+                        "graph_type": request.graph_type,
+                        "code_snippet": "",
+                        "review_feedback": "",
+                        "review_approved": False,
+                        "response": {},
+                        "review_attempts": 0,
+                        "max_review_attempts": 3,
+                        "echart_sample_code": request.echart_sample_code,
+                        **loading_data
+                    }
+                    llm=ChatAnthropic(model_name='claude-3-7-sonnet-20250219',max_tokens=60000)
+                    # llm=ChatAnthropic(model_name='claude-3-5-sonnet-20240620')
+                    workflow = DataAnalysisWorkflow(llm=llm)
+                    final_state = await asyncio.get_event_loop().run_in_executor(None, workflow.run, initial_state)
+                    analysis_result = {
+                        "success":True,
+                        "analysis_prompt":request.prompt,
+                        "analysis_id":analysis_id,
+                        "response_df":final_state.get("response_df").to_dict(),
+                        "echart_code":final_state.get("echart_code"),
+                        "designed_echart_code":final_state.get("designed_echart_code"),
+                        "analysis_duration":time.time() - analysis_start_time,
+                        
+                    }
+                    # Normalize output to the expected analysis_result dict including minimal payload
+                   
+
                     analysis_duration = time.time() - analysis_start_time
-                    logger.info(f"✅ AI workflow completed in {analysis_duration:.2f} seconds")
-                    
+                    logger.info(f"✅ LCEL workflow completed in {analysis_duration:.2f} seconds")
+
                 except Exception as workflow_error:
-                    logger.error("❌ AI workflow execution failed")
-                    log_exception(logger, "AI workflow error", workflow_error)
+                    logger.error("❌ LCEL workflow execution failed")
+                    log_exception(logger, "LCEL workflow error", workflow_error)
                     raise HTTPException(status_code=500, detail=f"AI workflow failed: {str(workflow_error)}")
                 
                 processing_time = time.time() - start_time
@@ -445,21 +284,7 @@ AVAILABLE DATAFRAMES INFORMATION:
                 
                 # Determine overall success with detailed logging
                 overall_success = False
-                if isinstance(analysis_result, dict):
-                    main_success = analysis_result.get("success", False)
-                    has_classification = bool(analysis_result.get("classification"))
-                    has_code = bool(analysis_result.get("generated_code"))
-                    has_execution = bool(analysis_result.get("execution"))
-                    
-                    overall_success = main_success or has_classification or has_code or has_execution
-                    
-                    logger.info(f"📊 Success Analysis:")
-                    logger.info(f"  Main success: {main_success}")
-                    logger.info(f"  Has classification: {has_classification}")
-                    logger.info(f"  Has code: {has_code}")
-                    logger.info(f"  Has execution: {has_execution}")
-                    logger.info(f"  Overall success: {overall_success}")
-                
+               
                 # Save to database with enhanced error handling
                 try:
                     logger.info("💾 Saving analysis result to database...")
@@ -478,19 +303,9 @@ AVAILABLE DATAFRAMES INFORMATION:
                         "database_id": db_result.id,
                         "task_id": task_id,
                         "success": overall_success,
-                        "file_info": {
-                            "file_id": file_id,
-                            "filename": file_obj.original_filename,
-                            "file_path": file_obj.file_path,
-                            "total_dataframes": len(dfs_list),
-                            "dataframes_metadata": dfs_metadata,
-                            "primary_dataframe": {
-                                "sheet_name": primary_sheet_name,
-                                "shape": primary_df.shape,
-                                "columns": primary_df.columns.tolist()
-                            },
-                            "processing_method": "multi_dataframes_excel" if file_obj.file_type.lower() in ['.xlsx', '.xls'] else "single_dataframe_csv"
-                        }
+                        # Snapshot of agent final state for frontend rendering (response_df, echarts, etc.)
+                        "final_state": final_state,
+                        
                     }
                     
                     total_duration = time.time() - start_time
@@ -510,14 +325,9 @@ AVAILABLE DATAFRAMES INFORMATION:
                         "database_id": None,
                         "task_id": task_id,
                         "success": overall_success,
-                        "save_error": str(save_error),
-                        "file_info": {
-                            "file_id": file_id,
-                            "filename": file_obj.original_filename,
-                            "file_path": file_obj.file_path,
-                            "total_dataframes": len(dfs_list),
-                            "dataframes_metadata": dfs_metadata
-                        }
+                        # Even on failed save, expose the final_state for frontend consumption
+                        "final_state": final_state,
+                        
                     }
             
         except Exception as e:

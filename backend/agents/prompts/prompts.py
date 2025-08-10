@@ -1,168 +1,314 @@
-from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.prompts import PromptTemplate
 
-# ===== NODE 1: UNDERSTANDING & CLASSIFY =====
-PROMPT_CLASSIFY_QUERY = ChatPromptTemplate.from_template("""
-You are a data analysis classifier. Analyze the user query and classify it as either:
-- GENERAL: For data filtering, aggregation, statistics, summaries, calculations
-- VISUALIZATION: For creating charts, graphs, plots, visual representations
 
-User Query: "{user_query}"
+START_PROMPT = PromptTemplate(
+    input_variables=["user_input", "available_sheets"],
+    template="""
+    You are an expert data analyst. Analyze the user's query and classify the type of analysis needed.
 
-Dataset Info:
-- Shape: {dataset_shape}
-- Columns: {columns}
-- Sample Data: {sample_data}
+    User Query: "{user_input}"
 
-Analyze the query and provide structured classification with:
-- query_type: "general" or "visualization"
-- reasoning: Why you chose this classification
-- user_intent: What the user wants to achieve
-- requires_data_filtering: Whether data filtering/selection is needed
-- confidence: Your confidence level (0-1)
+    Available Data Sheets: {available_sheets}
 
-Focus on the user's intent - do they want to see data or visualize data?
-""")
+    Classification Guidelines:
+    - "skill": Analysis of skills, competencies, capabilities, training needs
+    - "gap": Analysis of gaps, deficiencies, missing elements, shortfalls
+    - "count": Counting, tallying, totaling employees, records, items
+    - "summary": General overview, statistical summary, descriptive analysis
+    - "comparison": Comparing between groups, departments, time periods
+    - "unknown": Cannot determine clear analysis type
 
-# ===== NODE 2A & 2B: QUERY ANALYSIS & CODE GENERATION =====
-PROMPT_GENERAL_CODE_GENERATION = ChatPromptTemplate.from_template("""
-You are a Python data analysis expert. Generate code for GENERAL data analysis ONLY (NO VISUALIZATION).
+    For sheet suggestion, consider:
+    - "Back Office" for administrative roles
+    - "Call Center" for customer service roles
+    - "Leaders" for management and leadership roles
+    - "Retail" for retail/sales roles
+    - "Summary" for overall organizational data
 
-User Query: "{user_query}"
-Classification: {classification}
+    Analyze the query carefully and provide a structured response.
+    """
+)
 
-Dataset Info:
-- Shape: {dataset_shape}  
-- Columns: {columns}
-- Data Types: {data_types}
-- Sample: {sample_data}
+CODE_WRITER_PROMPT = PromptTemplate(
+    input_variables=["user_query", "analysis_classification", "sheet_info", "data_sample"],
+    template="""
+    You are a senior Python data analyst. Generate professional, production-ready code for data analysis.
 
-Generate Python code using ONLY pandas for:
-- Data filtering, aggregation, statistics, calculations
-- Print clear, formatted results to console
-- Handle missing data appropriately
-- Use df as the dataframe variable
-- NO PLOTTING, NO CHARTS, NO VISUALIZATION LIBRARIES
+    USER REQUEST: {user_query}
+    ANALYSIS TYPE: {analysis_classification}
+    SHEET INFO: {sheet_info}
+    DATA SAMPLE:
+    {data_sample}
 
-IMPORTANT RESTRICTIONS:
-- DO NOT import plotly, matplotlib, seaborn, or any visualization libraries
-- DO NOT create any plots, charts, or visual outputs
-- DO NOT save any HTML files
-- Output should be TEXT ONLY (print statements, tables, summaries)
+    REQUIREMENTS:
+    1. Use pandas best practices with proper error handling
+    2. Include comprehensive data validation
+    3. Add informative print statements for debugging
+    4. Store results in a dictionary called 'analysis_results'
+    5. Handle missing data appropriately
+    6. Use descriptive variable names
+    7. Add comments explaining the analysis logic
+    8. Produce a pandas DataFrame named 'analysis_df' that tabularizes the key results for downstream processing
+    9. Do not rely on global variables other than df, pd, np which are provided at runtime
+    10. DO NOT fabricate or simulate data under any circumstance. Operate STRICTLY on the provided dataframe `df`.
+    11. If the expected columns are not present, attempt robust column detection using fuzzy matching on names like ["employee", "id", "name", "family", "total", "score", "%"] including Arabic equivalents, and raise a clear error in 'analysis_results' if you cannot proceed. Never create fake rows.
 
-Provide structured output:
-- query_understanding: What the user wants (data analysis only)
-- approach: Your solution approach (text-based analysis only)
-- required_columns: List of column names as array (e.g., ["col1", "col2"])
-- generated_code: Complete Python code (pandas only, no visualization)
-- expected_output: What the code will produce (text/numerical results only)
+    CODE STRUCTURE:
+    ```python
+    import pandas as pd
+    import numpy as np
 
-IMPORTANT: required_columns must be a JSON array of strings, not a string representation.
-Focus on providing clear, numerical/textual answers to the user's question.
-""")
+    try:
+        # Data validation
+        print(f"Data shape: {{df.shape}}")
+        print(f"Data types: {{df.dtypes}}")
 
-PROMPT_VISUALIZATION_CODE_GENERATION = ChatPromptTemplate.from_template("""
-You are a Python visualization expert. Generate code for VISUALIZATION using plotly.
+        # Main analysis logic here
+        analysis_results = {{
+            'total_records': len(df),
+            'analysis_type': '{analysis_classification}',
+            # Add specific metrics based on analysis type
+        }}
 
-User Query: "{user_query}"
-Classification: {classification}
+        # Build tabular output for downstream processing
+        # analysis_df MUST exist and be a pandas DataFrame
+        analysis_df = pd.DataFrame([analysis_results])
 
-Dataset Info:
-- Shape: {dataset_shape}
-- Columns: {columns}
-- Data Types: {data_types}
-- Sample: {sample_data}
+        print("Analysis completed successfully")
+        print(f"Results: {{analysis_results}}")
 
-Generate Python code using pandas + plotly for:
-- Create interactive visualizations
-- Save as HTML file: 'plots/visualization.html'
-- Create plots directory: os.makedirs('plots', exist_ok=True)
-- Use appropriate chart types (bar, line, scatter, pie, etc.)
-- Include proper titles, labels, and formatting
-- Use df as the dataframe variable
+    except Exception as e:
+        analysis_results = {{
+            'error': str(e),
+            'analysis_type': '{analysis_classification}',
+            'status': 'failed'
+        }}
+        # Ensure a DataFrame is still created so the pipeline can continue
+        analysis_df = pd.DataFrame([analysis_results])
+        print(f"Analysis failed: {{e}}")
+    ```
 
-Provide structured output:
-- query_understanding: What visualization the user wants
-- approach: Your visualization approach
-- required_columns: List of column names as array (e.g., ["col1", "col2"])
-- generated_code: Complete Python code with plotly
-- expected_output: Description of the visualization
+    Generate the complete Python code:
+    """
+)
 
-IMPORTANT: required_columns must be a JSON array of strings, not a string representation.
-""")
+CODE_REVIEW_PROMPT = PromptTemplate(
+    input_variables=["code", "user_query", "analysis_type", "attempt_number", "max_attempts"],
+    template="""
+    You are a senior code reviewer conducting a professional code review.
 
-# ===== NODE 3: CODE REVIEW =====
-PROMPT_CODE_REVIEW = ChatPromptTemplate.from_template("""
-You are a Python code reviewer. Review this code to ensure it correctly fulfills the user's query.
+    CODE TO REVIEW:
+    ```python
+    {code}
+    ```
 
-User Query: "{user_query}"
-Generated Code:
-```python
-{generated_code}
-```
+    CONTEXT:
+    - User Query: {user_query}
+    - Analysis Type: {analysis_type}
+    - Review Attempt: {attempt_number}/{max_attempts}
 
-Code Analysis Context: {code_analysis}
+    REVIEW CRITERIA:
+    1. **Syntax & Logic**: Correct Python syntax and logical flow
+    2. **Error Handling**: Proper try-catch blocks and edge case handling
+    3. **Data Safety**: No operations that could crash with real data
+    4. **Performance**: Efficient pandas operations
+    5. **Readability**: Clear, well-commented code
+    6. **Contract**: The code MUST define both 'analysis_results' (dict) and 'analysis_df' (pandas DataFrame)
 
-Review the code for:
-1. Does it correctly address the user's query?
-2. Are there any syntax or logic errors?
-3. Will it produce the expected output?
-4. Is error handling adequate?
-5. Are required libraries imported?
+    APPROVAL GUIDELINES:
+    - APPROVE if code meets basic functionality requirements (be lenient on style)
+    - REJECT only for critical issues: syntax errors, logical flaws, missing error handling
+    - For attempt {attempt_number}/{max_attempts}: Be increasingly lenient
 
-Provide structured review:
-- is_correct: true if code correctly fulfills user query
-- review_status: "approved" or "needs_rewrite"
-- issues: Array of issue strings (e.g., ["issue1", "issue2"])
-- suggestions: Array of suggestion strings (e.g., ["suggestion1", "suggestion2"])
-- confidence: Your confidence in the review (0-1)
+    You must respond with a JSON object that has the following structure:
+    {{
+        "approved": boolean,
+        "feedback": "string describing overall feedback",
+        "issues": ["list", "of", "specific", "issues"],
+        "suggestions": ["list", "of", "improvement", "suggestions"],
+        "severity": "low|medium|high|critical"
+    }}
 
-IMPORTANT: issues and suggestions must be JSON arrays of strings, not single strings or bullet points.
-Be strict - only approve if the code will definitely work and answer the user's question.
-""")
+    Example response:
+    {{
+        "approved": true,
+        "feedback": "Code looks good with proper error handling",
+        "issues": [],
+        "suggestions": ["Consider adding more descriptive variable names"],
+        "severity": "low"
+    }}
+    """
+)
 
-# ===== NODE 4: CODE REWRITE =====
-PROMPT_CODE_REWRITE = ChatPromptTemplate.from_template("""
-The previous code had issues. Rewrite it to correctly fulfill the user query.
+ECHARTS_PROMPT = PromptTemplate(
+    input_variables=["user_query", "chart_type", "dataframe_overview", "data_preview"],
+    template="""
+    You are a senior front-end engineer. Generate a complete Node.js script that uses Apache ECharts to create a chart from the provided data.
 
-User Query: "{user_query}"
-Previous Code:
-```python
-{previous_code}
-```
+    CONTEXT:
+    - Chart Type: {chart_type}
+    - User Request: {user_query}
+    - DataFrame Overview: {dataframe_overview}
+    - Data Sample:
+    {data_preview}
 
-Review Issues: {review_issues}
-Suggestions: {review_suggestions}
+    REQUIREMENTS:
+    1. Generate ONLY the ECharts option object as valid JSON
+    2. Use the actual column names and data from the preview
+    3. For {chart_type} charts, structure the data appropriately:
+       - Bar/Line: Use first column as categories (xAxis.data), remaining numeric columns as series
+       - Pie: Use first two columns (name, value pairs)
+       - Scatter: Use first two numeric columns as [x, y] coordinates
+    4. Include proper titles, labels, and formatting
+    5. Do NOT include any JavaScript code, require statements, or markdown - ONLY the JSON option object
+    6. Ensure all strings are properly quoted and the JSON is valid
 
-Dataset Info:
-- Shape: {dataset_shape}
-- Columns: {columns}
-- Data Types: {data_types}
+    Generate the ECharts option object:
+    """
+)
 
-Rewrite the code addressing all issues. Provide structured output:
-- query_understanding: Clarified understanding
-- approach: Improved approach
-- required_columns: List of column names as array (e.g., ["col1", "col2"])
-- generated_code: Fixed/rewritten code
-- expected_output: What the new code will produce
+ECHARTS_DESIGN_PROMPT = PromptTemplate(
+    input_variables=["user_query", "chart_type", "current_options", "dataframe_overview", "data_preview"],
+    template="""
+    You are a senior UI/UX designer and data visualization expert specializing in creating professional, publication-ready charts using Apache ECharts.
 
-IMPORTANT: required_columns must be a JSON array of strings, not a string representation.
-Ensure the rewritten code is correct and will work properly.
-""")
+    CONTEXT:
+    - User Request: {user_query}
+    - Chart Type: {chart_type}
+    - Current ECharts Options: {current_options}
+    - DataFrame Overview: {dataframe_overview}
+    - Data Sample: {data_preview}
 
-# ===== NODE 5: FINAL RESULTS =====
-PROMPT_FINAL_RESULTS = ChatPromptTemplate.from_template("""
-Generate final results summary for the completed data analysis.
+    YOUR TASK:
+    Transform the current basic ECharts configuration into a professional, visually appealing chart suitable for business presentations and reports.
 
-User Query: "{user_query}"
-Execution Result: {execution_result}
-Query Type: {query_type}
+    DESIGN REQUIREMENTS:
+    1. **Professional Color Palette**: Use modern, accessible color schemes (avoid default colors)
+    2. **Typography**: Implement proper font hierarchy with readable sizes and weights
+    3. **Layout & Spacing**: Optimize margins, padding, and component positioning
+    4. **Visual Hierarchy**: Ensure clear data emphasis and logical information flow
+    5. **Accessibility**: Include proper contrast ratios and screen reader support
+    6. **Responsiveness**: Design for multiple screen sizes and orientations
+    7. **Brand Consistency**: Use professional styling suitable for corporate environments
 
-Create a comprehensive final result:
-- answer: Direct answer to user's question
-- summary: What analysis was performed
-- visualization_info: Details about any charts created
-- success: Whether the analysis was successful
+    SPECIFIC ENHANCEMENTS TO INCLUDE:
+    - Enhanced title styling with proper positioning and typography
+    - Professional color gradients or solid colors (no garish combinations)
+    - Improved legend positioning and styling
+    - Better tooltip formatting with rich content
+    - Grid lines and axis styling for clarity
+    - Animation settings for smooth interactions
+    - Shadow effects and border radius where appropriate
+    - Proper label formatting and positioning
+    - Data zoom and brush features if applicable
+    - Professional background colors or gradients
 
-Make the answer clear, actionable, and user-friendly.
-""")
+    OUTPUT FORMAT:
+    Return ONLY a valid JSON object representing the complete ECharts option configuration.
+    The JSON must be properly formatted and ready to be parsed by JSON.parse() in JavaScript.
+    Do NOT include any markdown fences, explanations, or additional text.
+    Do NOT include variable declarations or JavaScript code - ONLY the JSON options object.
 
+    EXAMPLE OUTPUT STRUCTURE:
+    {{
+        "backgroundColor": "#ffffff",
+        "title": {{
+            "text": "Professional Chart Title",
+            "textStyle": {{
+                "fontSize": 18,
+                "fontWeight": "bold",
+                "color": "#333333"
+            }},
+            "left": "center",
+            "top": 20
+        }},
+        "tooltip": {{...}},
+        "legend": {{...}},
+        "xAxis": {{...}},
+        "yAxis": {{...}},
+        "series": [{{...}}]
+    }}
+
+    Generate the enhanced ECharts options JSON now:
+    """
+)
+
+# New: Merge only original data points from previous ECharts code into the sample option block
+ECHARTS_CODE_MERGE_PROMPT = PromptTemplate(
+    input_variables=["previous_code", "echart_sample_code"],
+    template="""
+    You are a senior front-end engineer.
+
+    TASK:
+    - Take the PREVIOUS CODE (a working ECharts script) and the SAMPLE OPTION CODE.
+    - Extract ONLY the ORIGINAL DATA POINTS from the PREVIOUS CODE's ECharts option.
+      • For pie: series[0].data items (value/name pairs)
+      • For bar/line: xAxis.data (categories) and each series[i].data arrays
+      • For scatter/bubble: each series[i].data point arrays
+      • If legend.data exists in the previous option, use it; otherwise leave the sample's legend as-is
+    - Do NOT change styling, layout, titles, colors, axes styles, grid, background, animations, or any non-data property from the SAMPLE.
+    - Do NOT invent or fabricate any data.
+
+    OUTPUT REQUIREMENTS (STRICT):
+    - Return ONLY the updated SAMPLE option block from "{{" to the matching "}};".
+    - Do NOT include any code before or after the option block.
+    - Preserve the SAMPLE structure and all non-data values exactly; only transplant original data points.
+
+    --- PREVIOUS CODE START ---
+    {previous_code}
+    --- PREVIOUS CODE END ---
+
+    --- SAMPLE CODE START ---
+    {echart_sample_code}
+    --- SAMPLE CODE END ---
+
+    Now return EXACTLY the updated option block only:
+    """
+)
+
+
+ANALYSIS_PROMPT = PromptTemplate(
+    input_variables=["user_query", "analysis_type", "execution_results", "data_context"],
+    template="""
+    You are a senior business analyst providing insights to executive leadership.
+
+    ANALYSIS REQUEST: {user_query}
+    ANALYSIS TYPE: {analysis_type}
+    DATA CONTEXT: {data_context}
+
+    EXECUTION RESULTS:
+    {execution_results}
+
+    You must respond with a JSON object that matches this exact structure:
+    {{
+        "summary": "2-3 sentence executive summary",
+        "key_insights": [
+            "insight 1",
+            "insight 2",
+            "insight 3"
+        ],
+        "metrics": {{
+            "key1": "value1",
+            "key2": "value2"
+        }},
+        "recommendations": [
+            "recommendation 1",
+            "recommendation 2",
+            "recommendation 3"
+        ],
+        "data_quality_notes": [
+            "quality note 1",
+            "quality note 2"
+        ],
+        "methodology": "brief explanation of analysis approach"
+    }}
+
+    IMPORTANT:
+    - key_insights must be an array of strings, not a single string with bullet points
+    - recommendations must be an array of strings, not a single string with bullet points
+    - data_quality_notes must be an array of strings, not a single string with bullet points
+    - Each array item should be a complete sentence without bullet points or dashes
+
+    Provide comprehensive analysis based on the execution results above.
+    """
+)

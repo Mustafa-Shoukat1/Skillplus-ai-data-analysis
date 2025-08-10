@@ -51,51 +51,19 @@ class AnalysisResult(Base):
     __tablename__ = "analysis_results"
     
     id = Column(Integer, primary_key=True, index=True)
-    analysis_id = Column(String, unique=True, index=True, nullable=False)
-    user_query = Column(Text, nullable=False)
-    success = Column(Boolean, default=False)
-    
-    # Classification data
-    query_type = Column(String, nullable=True)
-    classification_reasoning = Column(Text, nullable=True)
-    user_intent = Column(Text, nullable=True)
-    requires_data_filtering = Column(Boolean, default=False)
-    classification_confidence = Column(Float, nullable=True)
-    
-    # Code analysis data
-    query_understanding = Column(Text, nullable=True)
-    approach = Column(Text, nullable=True)
-    required_columns = Column(JSON, nullable=True)
-    generated_code = Column(Text, nullable=True)
-    expected_output = Column(Text, nullable=True)
-    
-    # Execution data
-    execution_success = Column(Boolean, default=False)
-    execution_output = Column(Text, nullable=True)
-    visualization_created = Column(Boolean, default=False)
-    file_paths = Column(JSON, nullable=True)
-    
-    # Final results data
-    final_answer = Column(Text, nullable=True)
-    summary = Column(Text, nullable=True)
-    visualization_info = Column(JSON, nullable=True)
-    
-    # Visualization HTML content
-    visualization_html = Column(Text, nullable=True)
-    
-    # Metadata
-    retry_count = Column(Integer, default=0)
-    processing_time = Column(Float, nullable=True)
-    model_used = Column(String, nullable=True)
-    is_active = Column(Boolean, default=True)  # For visibility toggle
-    
-    # Timestamps
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    completed_at = Column(DateTime(timezone=True), nullable=True)
-    
-    # Foreign keys
+    analysis_id = Column(String(255), unique=True, index=True, nullable=False)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     file_id = Column(Integer, ForeignKey("uploaded_files.id"), nullable=False)
+    
+    # Essential fields only
+    query = Column(Text, nullable=False)
+    echart_code = Column(Text, nullable=True)
+    designed_echart_code = Column(Text, nullable=True)
+    response_df = Column(JSON, nullable=True)  # Store as JSON
+    
+    # Metadata
+    created_at = Column(DateTime, default=datetime.utcnow)
+    is_active = Column(Boolean, default=True)
     
     # Relationships
     user = relationship("User", back_populates="analysis_results")
