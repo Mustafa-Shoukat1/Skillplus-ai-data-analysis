@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks, 
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update
-from models.database import UploadedFile, User, AnalysisResult
+from models.database import UploadedFile, User, AnalysisResult, AnalysisType
 from models.data_analysis import DataAnalysisRequest, MinimalAnalysisResponse
 from services.auth import get_current_active_user
 from services.data_analysis import DataAnalysisService
@@ -115,6 +115,22 @@ async def start_analysis(
             task_id,
             analysis_id,
         )
+        
+        # If analysis_type is provided, save it to the analysis_types table
+        if hasattr(request, 'analysis_type') and request.analysis_type:
+            try:
+                analysis_type_record = AnalysisType(
+                    analysis_id=analysis_id,
+                    user_id=default_user_id,
+                    analysis_type=request.analysis_type,
+                    is_active=True
+                )
+                db.add(analysis_type_record)
+                await db.commit()
+                logger.info(f"✅ Saved analysis type: {request.analysis_type} for analysis: {analysis_id}")
+            except Exception as e:
+                logger.warning(f"⚠️ Failed to save analysis type: {e}")
+                # Don't fail the entire request if this fails
 
         # Respond immediately so API does not block
         return JSONResponse(
@@ -235,16 +251,7 @@ async def get_analysis_result(task_id: str):
     analysis_dict = safe_extract(analysis_data.get("analysis"))
     execution_dict = safe_extract(analysis_data.get("execution"))
     final_results_dict = safe_extract(analysis_data.get("final_results"))
-    
-    # Check query type
-    query_type = classification_dict.get("query_type", "unknown")
-    if hasattr(query_type, 'value'):
-        query_type_str = query_type.value
-    else:
-        query_type_str = str(query_type).lower()
-    
-    logger.info(f"Processing result for query type: {query_type_str}")
-    
+
     # Extract summary - try multiple source
     
     # Determine success status
@@ -299,23 +306,31 @@ async def toggle_analysis_visibility(
     visibility_data: dict,
     db: AsyncSession = Depends(get_async_db_dependency)
 ):
-    """Toggle analysis visibility for viewers using is_active field"""
+    """Toggle analysis visibility for viewers using is_active field in both tables"""
     try:
         is_active = visibility_data.get("is_active", True)
         logger.info(f"Toggling analysis {analysis_id} is_active to: {is_active}")
         
-        result = await db.execute(
+        # Update AnalysisResult table
+        result1 = await db.execute(
             update(AnalysisResult)
             .where(AnalysisResult.analysis_id == analysis_id)
             .values(is_active=is_active)
         )
         
-        if result.rowcount == 0:
+        # Update AnalysisType table if it exists
+        result2 = await db.execute(
+            update(AnalysisType)
+            .where(AnalysisType.analysis_id == analysis_id)
+            .values(is_active=is_active)
+        )
+        
+        if result1.rowcount == 0:
             logger.warning(f"Analysis not found: {analysis_id}")
             raise HTTPException(status_code=404, detail="Analysis not found")
         
         await db.commit()
-        logger.info(f"Analysis {analysis_id} is_active updated to: {is_active}")
+        logger.info(f"Analysis {analysis_id} is_active updated to: {is_active} (AnalysisResult: {result1.rowcount}, AnalysisType: {result2.rowcount})")
         
         return JSONResponse(
             content={
@@ -339,36 +354,75 @@ async def toggle_analysis_visibility(
 
 @router.get("/active")
 async def get_active_analyses(
+    analysis_type: str = None,
     db: AsyncSession = Depends(get_async_db_dependency)
 ):
-    """Get all active analyses visible to viewers"""
+    """Get all active analyses visible to viewers, optionally filtered by analysis type"""
     try:
-        result = await db.execute(
-            select(AnalysisResult)
-            .where(AnalysisResult.is_active == True)
-            .order_by(AnalysisResult.created_at.desc())
-        )
-        analyses = result.scalars().all()
+        if analysis_type:
+            # Join with analysis_types table to filter by analysis type
+            query = select(AnalysisResult, AnalysisType).join(
+                AnalysisType, AnalysisResult.analysis_id == AnalysisType.analysis_id
+            ).where(
+                AnalysisResult.is_active == True,
+                AnalysisType.is_active == True,
+                AnalysisType.analysis_type == analysis_type
+            )
+        else:
+            # Get all active analyses
+            query = select(AnalysisResult).where(AnalysisResult.is_active == True)
+        
+        query = query.order_by(AnalysisResult.created_at.desc())
+        result = await db.execute(query)
         
         active_analyses = []
-        for analysis in analyses:
-            analysis_dict = {
-                "analysis_id": analysis.analysis_id,
-                "query": analysis.query,
-                "echart_code": analysis.echart_code,
-                "designed_echart_code": analysis.designed_echart_code,
-                "response_df": analysis.response_df,
-                "created_at": analysis.created_at.isoformat() if analysis.created_at else None,
-                "is_active": analysis.is_active
-            }
-            active_analyses.append(analysis_dict)
+        if analysis_type:
+            # Handle joined results
+            for analysis_result, analysis_type_obj in result:
+                analysis_dict = {
+                    "analysis_id": analysis_result.analysis_id,
+                    "query": analysis_result.query,
+                    "echart_code": analysis_result.echart_code,
+                    "designed_echart_code": analysis_result.designed_echart_code,
+                    "response_df": analysis_result.response_df,
+                    "created_at": analysis_result.created_at.isoformat() if analysis_result.created_at else None,
+                    "is_active": analysis_result.is_active,
+                    "analysis_type": analysis_type_obj.analysis_type
+                }
+                active_analyses.append(analysis_dict)
+        else:
+            # Handle single table results
+            analyses = result.scalars().all()
+            for analysis in analyses:
+                # Try to get analysis type from analysis_types table
+                type_query = select(AnalysisType).where(
+                    AnalysisType.analysis_id == analysis.analysis_id,
+                    AnalysisType.is_active == True
+                )
+                type_result = await db.execute(type_query)
+                analysis_type_obj = type_result.scalar_one_or_none()
+                
+                detected_type = analysis_type_obj.analysis_type if analysis_type_obj else "general"
+                
+                analysis_dict = {
+                    "analysis_id": analysis.analysis_id,
+                    "query": analysis.query,
+                    "echart_code": analysis.echart_code,
+                    "designed_echart_code": analysis.designed_echart_code,
+                    "response_df": analysis.response_df,
+                    "created_at": analysis.created_at.isoformat() if analysis.created_at else None,
+                    "is_active": analysis.is_active,
+                    "analysis_type": detected_type
+                }
+                active_analyses.append(analysis_dict)
         
-        logger.info(f"Retrieved {len(active_analyses)} active analyses")
+        logger.info(f"Retrieved {len(active_analyses)} active analyses" + (f" for type '{analysis_type}'" if analysis_type else ""))
         
         return {
             "success": True,
             "data": active_analyses,
-            "count": len(active_analyses)
+            "count": len(active_analyses),
+            "analysis_type": analysis_type
         }
         
     except Exception as e:

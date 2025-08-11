@@ -9,7 +9,7 @@ import time
 from core.config import settings
 from core.database import init_db
 from core.logger import logger
-from routes import auth, uploads, data_analysis, templates, metadata
+from routes import auth, uploads, data_analysis, templates, metadata, graph_templates
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -41,7 +41,10 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "http://localhost:3000",
-        "http://127.0.0.1:3000"
+        "http://127.0.0.1:3000",
+        "http://127.0.0.1:3000",
+        "https://skill-pulse.io",
+        "http://104.154.216.61"
     ],  # Specific origins for development
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
@@ -107,6 +110,7 @@ app.include_router(uploads.router, prefix=settings.API_PREFIX)
 app.include_router(data_analysis.router, prefix=settings.API_PREFIX)
 app.include_router(templates.router, prefix=settings.API_PREFIX)
 app.include_router(metadata.router, prefix=settings.API_PREFIX)
+app.include_router(graph_templates.router, prefix=settings.API_PREFIX)
 
 def main():
     import uvicorn
@@ -131,5 +135,3 @@ if __name__ == "__main__":
     )
 
 
-if __name__ == "__main__":
-    main()

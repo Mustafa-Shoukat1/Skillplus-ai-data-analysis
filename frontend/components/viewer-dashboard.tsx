@@ -6,10 +6,14 @@ import { Badge } from "@/components/ui/badge"
 import { Eye, Brain, Calendar, TrendingUp, AlertCircle, Loader2, RefreshCw, ClipboardCheck, BookOpen, Target, BarChart } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import ComingSoonModal from "./coming-soon-modal"
+import EChartsRenderer from "./echarts-renderer"
+import AnalysisDashboard from "./analysis-dashboard"
+import { getVisibleAnalyses, toggleAnalysisVisibility } from "@/lib/api"
 
 interface ViewerDashboardProps {
   user: any
 }
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api'
 
 interface ActiveAnalysis {
   analysis_id: string
@@ -95,8 +99,8 @@ const VisualizationDisplay = ({
     setError(null)
     
     try {
-      const response = await fetch(`http://localhost:8000/api/analysis/visualization/${analysisId}`)
-      
+      const response = await fetch(`${API_BASE_URL}/analysis/visualization/${analysisId}`)
+
       if (response.ok) {
         const content = await response.text()
         if (content && content.trim().length > 100) {
@@ -203,6 +207,9 @@ export default function ViewerDashboard({ user }: ViewerDashboardProps) {
   const [activeAnalyses, setActiveAnalyses] = useState<ActiveAnalysis[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [selectedAnalysisType, setSelectedAnalysisType] = useState<string | null>(null)
+  const [skillAnalyses, setSkillAnalyses] = useState<any[]>([])
+  const [gapAnalyses, setGapAnalyses] = useState<any[]>([])
   const [activeModal, setActiveModal] = useState<string | null>(null)
 
   // Fetch active analyses from the API
@@ -212,21 +219,15 @@ export default function ViewerDashboard({ user }: ViewerDashboardProps) {
       setError(null)
       
       console.log("🔍 Fetching active analyses from API...")
-      const response = await fetch('http://localhost:8000/api/analysis/active')
+      const response = await getVisibleAnalyses()
       
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`)
-      }
-      
-      const result = await response.json()
-      console.log("✅ Active analyses response:", result)
-      
-      if (result.success && Array.isArray(result.data)) {
-        setActiveAnalyses(result.data)
-        console.log(`📊 Loaded ${result.data.length} active analyses`)
+      if (response.success && response.data?.data) {
+        setActiveAnalyses(response.data.data)
+        console.log(`📊 Loaded ${response.data.data.length} active analyses`)
       } else {
-        console.warn("⚠️ Unexpected response format:", result)
+        console.warn("⚠️ API error:", response.error)
         setActiveAnalyses([])
+        setError(response.error || 'Failed to load analyses')
       }
     } catch (err) {
       console.error("❌ Failed to fetch active analyses:", err)
@@ -237,17 +238,72 @@ export default function ViewerDashboard({ user }: ViewerDashboardProps) {
     }
   }
 
+  // Fetch analyses by type for dashboard views
+  const fetchAnalysesByType = async (analysisType: string) => {
+    try {
+      setLoading(true)
+      setError(null)
+
+      console.log(`🔄 Fetching ${analysisType} analyses from API...`)
+      const response = await getVisibleAnalyses(analysisType)
+
+      if (response.success && response.data?.data) {
+        console.log(`✅ Successfully loaded ${response.data.data.length} ${analysisType} analyses`)
+        
+        if (analysisType === 'skill') {
+          setSkillAnalyses(response.data.data)
+        } else if (analysisType === 'gap') {
+          setGapAnalyses(response.data.data)
+        }
+      } else {
+        console.error("❌ API returned error:", response.error)
+        setError(response.error || `Failed to load ${analysisType} analyses`)
+      }
+    } catch (error) {
+      console.error("❌ Network error:", error)
+      setError("Failed to connect to the server")
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  // Handle navigation to analysis dashboards
+  const handleAnalysisTypeClick = async (analysisType: string) => {
+    setSelectedAnalysisType(analysisType)
+    await fetchAnalysesByType(analysisType)
+  }
+
   // Load data on component mount
   useEffect(() => {
     fetchActiveAnalyses()
   }, [])
 
   const handleFeatureClick = (featureId: string) => {
-    setActiveModal(featureId)
+    if (featureId === 'skill_analysis') {
+      handleAnalysisTypeClick('skill')
+    } else if (featureId === 'gap_analysis') {
+      handleAnalysisTypeClick('gap')
+    } else {
+      setActiveModal(featureId)
+    }
   }
 
   const getActiveModalData = () => {
     return VIEWER_DISABLED_FEATURES.find((feature) => feature.id === activeModal)
+  }
+
+  // Show analysis dashboard if a type is selected
+  if (selectedAnalysisType) {
+    const currentAnalyses = selectedAnalysisType === 'skill' ? skillAnalyses : gapAnalyses
+    return (
+      <AnalysisDashboard
+        analysisType={selectedAnalysisType}
+        analyses={currentAnalyses}
+        onBack={() => setSelectedAnalysisType(null)}
+        loading={loading}
+        error={error}
+      />
+    )
   }
 
   if (loading) {
@@ -288,16 +344,19 @@ export default function ViewerDashboard({ user }: ViewerDashboardProps) {
                         <div className="font-medium text-gray-800 group-hover:text-purple-700 transition-colors">
                           {feature.name}
                         </div>
-                        <div className="flex items-center space-x-2 mt-1">
-                          <Badge variant="outline" className="text-xs px-2 py-0 border-red-300 text-red-600">
-                            Disabled for now
-                          </Badge>
-                          <div className="flex space-x-1">
-                            <div className="w-1.5 h-1.5 bg-purple-400 rounded-full animate-pulse" />
-                            <div className="w-1.5 h-1.5 bg-blue-400 rounded-full animate-pulse delay-100" />
-                            <div className="w-1.5 h-1.5 bg-indigo-400 rounded-full animate-pulse delay-200" />
+                        {/* Remove "Disabled for now" label for Skill Analysis and Gap Analysis */}
+                        {feature.id !== "skill_analysis" && feature.id !== "gap_analysis" && (
+                          <div className="flex items-center space-x-2 mt-1">
+                            <Badge variant="outline" className="text-xs px-2 py-0 border-red-300 text-red-600">
+                              Disabled for now
+                            </Badge>
+                            <div className="flex space-x-1">
+                              <div className="w-1.5 h-1.5 bg-purple-400 rounded-full animate-pulse" />
+                              <div className="w-1.5 h-1.5 bg-blue-400 rounded-full animate-pulse delay-100" />
+                              <div className="w-1.5 h-1.5 bg-indigo-400 rounded-full animate-pulse delay-200" />
+                            </div>
                           </div>
-                        </div>
+                        )}
                       </div>
                     </div>
                   </div>

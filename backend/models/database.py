@@ -90,3 +90,37 @@ class AITemplate(Base):
     
     # Relationships
     creator = relationship("User", back_populates="created_templates")
+
+class GraphTemplate(Base):
+    __tablename__ = "graph_templates"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    graph_type = Column(String, nullable=False, index=True)  # e.g., "bar_chart", "line_chart", "pie_chart"
+    graph_name = Column(String, nullable=False)  # Display name e.g., "Bar Chart", "Line Chart"
+    echart_code = Column(Text, nullable=False)  # The ECharts configuration code
+    description = Column(Text, nullable=True)  # Optional description
+    category = Column(String, nullable=True)  # e.g., "skill-analysis", "gap-analysis", "general"
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    
+    # Foreign key for creator
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    
+    # Relationships
+    creator = relationship("User", foreign_keys=[created_by])
+
+class AnalysisType(Base):
+    __tablename__ = "analysis_types"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    analysis_id = Column(String, ForeignKey("analysis_results.analysis_id"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    analysis_type = Column(String, nullable=False, index=True)  # "skill-analysis" or "gap-analysis"
+    is_active = Column(Boolean, default=True)  # Public/Private status for viewers
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    
+    # Relationships
+    analysis_result = relationship("AnalysisResult", foreign_keys=[analysis_id])
+    user = relationship("User", foreign_keys=[user_id])

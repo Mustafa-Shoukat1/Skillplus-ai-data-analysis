@@ -5,6 +5,7 @@ import { useState, useEffect } from "react"
 interface VisualizationLoaderProps {
   analysisId: string
 }
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api'
 
 export default function VisualizationLoader({ analysisId }: VisualizationLoaderProps) {
   const [htmlContent, setHtmlContent] = useState<string | null>(null)
@@ -20,8 +21,8 @@ export default function VisualizationLoader({ analysisId }: VisualizationLoaderP
         console.log("Loading visualization for analysis_id:", analysisId)
         
         // Try to fetch from backend API first
-        const response = await fetch(`http://localhost:8000/api/analysis/visualization/${analysisId}`)
-        
+        const response = await fetch(`${API_BASE_URL}/analysis/visualization/${analysisId}`)
+
         if (response.ok) {
           const content = await response.text()
           if (content && content.trim().length > 100) { // Valid HTML content

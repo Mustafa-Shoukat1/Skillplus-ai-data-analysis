@@ -101,6 +101,7 @@ class DataAnalysisRequest(BaseModel):
     sheet: Optional[str] = None
     echart_sample_code: Optional[str] = None
     enable_code_review: Optional[bool] = True
+    analysis_type: Optional[str] = None  # "skill-analysis" or "gap-analysis"
 
 class ChartGenerationResponse(BaseModel):
     success: bool

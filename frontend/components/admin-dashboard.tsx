@@ -4,7 +4,7 @@ import { useState } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Upload, Bot, Users, FileText, Brain, CheckCircle, TrendingUp, Eye, EyeOff, ToggleLeft, ToggleRight, Settings } from "lucide-react"
+import { Upload, Bot, Users, FileText, Brain, CheckCircle, TrendingUp, Eye, EyeOff, ToggleLeft, ToggleRight, Settings, Expand, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import FileUpload from "./file-upload"
 import UserManagement from "./user-management"
@@ -12,7 +12,9 @@ import AIAnalysisGenerator from "./ai-analysis-generator"
 import AdvancedAnalysisForm from "./advanced-analysis-form"
 import VisualizationLoader from "./visualization-loader"
 import EChartsRenderer from "./echarts-renderer"
+import EnhancedAdminPanel from "./enhanced-admin-panel"
 import { toggleAnalysisVisibility } from "@/lib/api"
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api'
 
 interface AdminDashboardProps {
   user: any
@@ -23,6 +25,44 @@ interface AdminDashboardProps {
   users: any[]
   onAddUser: (user: any) => void
   onDeleteUser: (userId: string) => void
+}
+
+// Add modal interface
+interface FullScreenModalProps {
+  isOpen: boolean
+  onClose: () => void
+  title: string
+  echartCode: string
+}
+
+// Full screen modal component
+const FullScreenModal: React.FC<FullScreenModalProps> = ({ isOpen, onClose, title, echartCode }) => {
+  if (!isOpen) return null
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/90 backdrop-blur-sm">
+      <div className="absolute inset-4 bg-white rounded-lg shadow-2xl flex flex-col">
+        <div className="flex justify-between items-center p-4 border-b border-gray-200">
+          <h2 className="text-xl font-bold text-gray-800">{title}</h2>
+          <Button
+            onClick={onClose}
+            className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+            variant="ghost"
+          >
+            <X className="h-6 w-6" />
+          </Button>
+        </div>
+        
+        <div className="flex-1 p-4">
+          <EChartsRenderer 
+            optionCode={echartCode}
+            height="100%"
+            width="100%"
+          />
+        </div>
+      </div>
+    </div>
+  )
 }
 
 export default function AdminDashboard({
@@ -100,7 +140,7 @@ export default function AdminDashboard({
       
       if (!htmlContent) {
         // Try to fetch from backend
-        fetch(`http://localhost:8000/api/analysis/visualization/${analysisId}`)
+        fetch(`${API_BASE_URL}/analysis/visualization/${analysisId}`)
           .then(response => response.text())
           .then(content => {
             const blob = new Blob([content], { type: 'text/html' })
@@ -159,6 +199,53 @@ export default function AdminDashboard({
       }
     } catch (error) {
       console.error('Error updating visibility:', error)
+      alert('Error updating visibility. Please try again.')
+    }
+  }
+
+  // Add modal state
+  const [fullScreenModal, setFullScreenModal] = useState({
+    isOpen: false,
+    title: '',
+    echartCode: ''
+  })
+
+  // Function to open full screen modal
+  const openFullScreen = (title: string, echartCode: string) => {
+    setFullScreenModal({
+      isOpen: true,
+      title,
+      echartCode
+    })
+  }
+
+  // Function to close modal
+  const closeFullScreen = () => {
+    setFullScreenModal({
+      isOpen: false,
+      title: '',
+      echartCode: ''
+    })
+  }
+
+  // Add history visibility toggle function if not already present
+  const handleHistoryVisibilityToggle = async (analysisId: string, currentActive: boolean) => {
+    try {
+      const response = await toggleAnalysisVisibility(analysisId, !currentActive)
+      
+      if (response.success) {
+        // Update any history state if you have it
+        console.log(`History analysis ${analysisId} visibility updated to: ${!currentActive}`)
+        
+        // Show brief feedback
+        const action = !currentActive ? 'public' : 'private'
+        console.log(`Analysis is now ${action}`)
+      } else {
+        console.error('Failed to update history visibility:', response.error)
+        alert('Failed to update visibility. Please try again.')
+      }
+    } catch (error) {
+      console.error('Error updating history visibility:', error)
       alert('Error updating visibility. Please try again.')
     }
   }
@@ -230,20 +317,15 @@ export default function AdminDashboard({
               {getTabIcon("upload")}
               <span>Data Upload</span>
             </TabsTrigger>
+
             <TabsTrigger
-              value="ai-analysis"
+              value="enhanced-panel"
               className="flex items-center space-x-2 data-[state=active]:bg-purple-500/20 data-[state=active]:text-white text-gray-300"
             >
-              {getTabIcon("ai-analysis")}
+              <Settings className="h-4 w-4" />
               <span>AI Analysis</span>
             </TabsTrigger>
-            <TabsTrigger
-              value="advanced-analysis"
-              className="flex items-center space-x-2 data-[state=active]:bg-green-500/20 data-[state=active]:text-white text-gray-300"
-            >
-              {getTabIcon("advanced-analysis")}
-              <span>Advanced Analysis</span>
-            </TabsTrigger>
+
             <TabsTrigger
               value="users"
               className="flex items-center space-x-2 data-[state=active]:bg-green-500/20 data-[state=active]:text-white text-gray-300"
@@ -304,12 +386,23 @@ export default function AdminDashboard({
             />
           </TabsContent>
 
+          {/* Enhanced Admin Panel Tab - NEW */}
+          <TabsContent value="enhanced-panel" className="space-y-6">
+            <EnhancedAdminPanel
+              uploadedFileId={uploadedFileId}
+              onAnalysisGenerated={(analysis) => {
+                setAnalyses(prev => [analysis, ...prev])
+                onAnalysisGenerated(analysis)
+              }}
+            />
+          </TabsContent>
+
           {/* User Management Tab */}
           <TabsContent value="users" className="space-y-6">
             <UserManagement currentUser={user} users={users} onAddUser={onAddUser} onDeleteUser={onDeleteUser} />
           </TabsContent>
 
-          {/* Reports Tab - Enhanced with ECharts rendering */}
+          {/* Reports Tab - Enhanced with expand buttons */}
           <TabsContent value="reports" className="space-y-6">
             <Card className="glass border-white/20">
               <CardHeader>
@@ -326,7 +419,6 @@ export default function AdminDashboard({
                     <p className="text-gray-400">Use the AI Analysis or Advanced Analysis tabs to generate your first report</p>
                   </div>
                 ) : (
-                  /* Grid Layout for Reports with Enhanced ECharts Support */
                   <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
                     {analyses.map((analysis, index) => {
                       const analysisId = analysis.analysis_id || analysis.analysisId || analysis.id?.toString() || `temp_${index}`
@@ -450,7 +542,7 @@ export default function AdminDashboard({
                             </div>
                           )}
 
-                          {/* Enhanced Visualization Preview with ECharts Renderer */}
+                          {/* Enhanced Visualization Preview with ECharts Renderer - ENHANCED */}
                           {analysis.backendResult?.designed_echart_code && isVisible && (
                             <div className="mb-3 p-3 bg-purple-500/10 rounded-lg border border-purple-500/30">
                               <div className="flex items-center justify-between mb-2">
@@ -458,14 +550,24 @@ export default function AdminDashboard({
                                   <TrendingUp className="h-4 w-4 mr-1" />
                                   Enhanced Visualization
                                 </h4>
-                                <Button
-                                  size="sm"
-                                  onClick={() => handleDownloadChart(analysis)}
-                                  className="bg-purple-600 hover:bg-purple-700 text-white text-xs"
-                                >
-                                  <Eye className="h-3 w-3 mr-1" />
-                                  Download
-                                </Button>
+                                <div className="flex items-center space-x-2">
+                                  <Button
+                                    size="sm"
+                                    onClick={() => openFullScreen(analysis.title, analysis.backendResult.designed_echart_code)}
+                                    className="bg-blue-600 hover:bg-blue-700 text-white text-xs p-1"
+                                    title="Expand to full screen"
+                                  >
+                                    <Expand className="h-3 w-3" />
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    onClick={() => handleDownloadChart(analysis)}
+                                    className="bg-purple-600 hover:bg-purple-700 text-white text-xs"
+                                  >
+                                    <Eye className="h-3 w-3 mr-1" />
+                                    Download
+                                  </Button>
+                                </div>
                               </div>
                               <div className="bg-white rounded-lg p-2">
                                 <EChartsRenderer 
@@ -476,7 +578,7 @@ export default function AdminDashboard({
                             </div>
                           )}
 
-                          {/* Fallback to regular visualization if no designed code */}
+                          {/* Fallback to regular visualization if no designed code - ENHANCED */}
                           {!analysis.backendResult?.designed_echart_code && analysis.visualizationHtml && isVisible && (
                             <div className="mb-3 p-3 bg-purple-500/10 rounded-lg border border-purple-500/30">
                               <div className="flex items-center justify-between mb-2">
@@ -484,14 +586,27 @@ export default function AdminDashboard({
                                   <TrendingUp className="h-4 w-4 mr-1" />
                                   Visualization Preview
                                 </h4>
-                                <Button
-                                  size="sm"
-                                  onClick={() => handleDownloadChart(analysis)}
-                                  className="bg-purple-600 hover:bg-purple-700 text-white text-xs"
-                                >
-                                  <Eye className="h-3 w-3 mr-1" />
-                                  Download
-                                </Button>
+                                <div className="flex items-center space-x-2">
+                                  <Button
+                                    size="sm"
+                                    onClick={() => {
+                                      // For iframe content, we can't easily expand, so just show download
+                                      alert("Full screen expansion not available for this chart type. Use download instead.")
+                                    }}
+                                    className="bg-blue-600 hover:bg-blue-700 text-white text-xs p-1"
+                                    title="Expand to full screen"
+                                  >
+                                    <Expand className="h-3 w-3" />
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    onClick={() => handleDownloadChart(analysis)}
+                                    className="bg-purple-600 hover:bg-purple-700 text-white text-xs"
+                                  >
+                                    <Eye className="h-3 w-3 mr-1" />
+                                    Download
+                                  </Button>
+                                </div>
                               </div>
                               <div className="bg-white rounded-lg p-2">
                                 {analysis.visualizationHtml === "stored_separately" ? (
@@ -522,6 +637,14 @@ export default function AdminDashboard({
           </TabsContent>
         </Tabs>
       </div>
+
+      {/* Full Screen Modal */}
+      <FullScreenModal
+        isOpen={fullScreenModal.isOpen}
+        onClose={closeFullScreen}
+        title={fullScreenModal.title}
+        echartCode={fullScreenModal.echartCode}
+      />
     </div>
   )
 }

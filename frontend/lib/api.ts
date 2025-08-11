@@ -284,9 +284,13 @@ export const toggleAnalysisVisibility = async (analysisId: string, isActive: boo
   }
 }
 
-export const getVisibleAnalyses = async (): Promise<ApiResponse> => {
+export const getVisibleAnalyses = async (analysisType?: string): Promise<ApiResponse> => {
   try {
-    const response = await fetch(`${API_BASE_URL}/analysis/active`, {  // Changed endpoint name
+    const url = analysisType 
+      ? `${API_BASE_URL}/analysis/active?analysis_type=${analysisType}`
+      : `${API_BASE_URL}/analysis/active`
+      
+    const response = await fetch(url, {
       method: 'GET',
       headers: {
         'Accept': 'application/json',
@@ -596,11 +600,12 @@ export const getAvailableSheets = async (fileId: string): Promise<ApiResponse> =
   }
 }
 
-export const getAvailableGraphTypes = async (): Promise<ApiResponse> => {
+// Graph Templates API - NEW
+export const getGraphTemplates = async (): Promise<ApiResponse> => {
   try {
-    console.log("API: Getting available graph types")
+    console.log("API: Getting graph templates")
     
-    const response = await fetch(`${API_BASE_URL}/analysis/graph-types`, {
+    const response = await fetch(`${API_BASE_URL}/graph-templates/?page=1&page_size=50&is_active=true`, {
       method: 'GET',
       headers: {
         'Accept': 'application/json',
@@ -608,10 +613,10 @@ export const getAvailableGraphTypes = async (): Promise<ApiResponse> => {
       credentials: 'include',
     })
 
-    console.log("API: Graph types response status:", response.status)
+    console.log("API: Graph templates response status:", response.status)
 
     if (!response.ok) {
-      let errorDetail = 'Failed to get graph types'
+      let errorDetail = 'Failed to get graph templates'
       try {
         const errorData = await response.json()
         errorDetail = errorData.detail || errorDetail
@@ -622,11 +627,47 @@ export const getAvailableGraphTypes = async (): Promise<ApiResponse> => {
     }
 
     const data = await response.json()
-    console.log("API: Graph types data received:", data)
+    console.log("API: Graph templates data received:", data)
 
     return {
       success: true,
       data: data
+    }
+  } catch (error) {
+    console.error('API: Get graph templates error:', error)
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to get graph templates'
+    }
+  }
+}
+
+export const getAvailableGraphTypes = async (): Promise<ApiResponse> => {
+  try {
+    console.log("API: Getting available graph types")
+    
+    // Use the new graph templates endpoint instead
+    const response = await getGraphTemplates()
+    
+    if (response.success && response.data?.graph_templates) {
+      // Transform templates to the expected format
+      const graphTypes = response.data.graph_templates.map((template: any) => ({
+        value: template.graph_type,
+        name: template.graph_name,
+        description: template.description,
+        echart_code: template.echart_code,
+        category: template.category
+      }))
+      
+      return {
+        success: true,
+        data: {
+          graph_types: graphTypes,
+          total_types: graphTypes.length
+        }
+      }
+    } else {
+      throw new Error(response.error || 'Failed to fetch graph templates')
     }
   } catch (error) {
     console.error('API: Get graph types error:', error)
