@@ -499,3 +499,32 @@ async def debug_tasks():
             for task_id, task_data in analysis_results.items()
         }
     }
+
+@router.get("/graph-types")
+async def get_available_graph_types():
+    """Get available graph types for visualization"""
+    try:
+        graph_types = [
+            {"value": "bar", "name": "Bar Chart", "description": "Compare values across categories"},
+            {"value": "line", "name": "Line Chart", "description": "Show trends over time"},
+            {"value": "pie", "name": "Pie Chart", "description": "Show proportions of a whole"},
+            {"value": "scatter", "name": "Scatter Plot", "description": "Show correlation between variables"},
+            {"value": "area", "name": "Area Chart", "description": "Show cumulative values over time"},
+            {"value": "histogram", "name": "Histogram", "description": "Show distribution of values"},
+            {"value": "box", "name": "Box Plot", "description": "Show statistical distribution"},
+            {"value": "heatmap", "name": "Heat Map", "description": "Show data density or correlation"},
+            {"value": "radar", "name": "Radar Chart", "description": "Compare multiple variables"},
+            {"value": "bubble", "name": "Bubble Chart", "description": "Three-dimensional scatter plot"}
+        ]
+        
+        return {
+            "success": True,
+            "data": {
+                "graph_types": graph_types,
+                "total_types": len(graph_types)
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting graph types: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get graph types")

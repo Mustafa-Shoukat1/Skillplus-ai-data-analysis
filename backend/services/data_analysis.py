@@ -1,5 +1,6 @@
 import asyncio
 import os
+import re
 from langchain_anthropic.chat_models import ChatAnthropic
 import pandas as pd
 import time
@@ -256,13 +257,21 @@ class DataAnalysisService:
                     # llm=ChatAnthropic(model_name='claude-3-5-sonnet-20240620')
                     workflow = DataAnalysisWorkflow(llm=llm)
                     final_state = await asyncio.get_event_loop().run_in_executor(None, workflow.run, initial_state)
+                    designed_echart_code = final_state.get("designed_echart_code")
+                    # clean code by removing ``` ``` and word option
+                    designed_echart_code = re.sub(r"^```|```$", "", designed_echart_code.strip(), flags=re.MULTILINE)
+
+                    # Remove "option =" and any leading/trailing spaces or semicolons
+                    designed_echart_code = re.sub(r"^\s*option\s*=\s*", "", designed_echart_code.strip())
+                    designed_echart_code = designed_echart_code.rstrip(";").strip()
+
                     analysis_result = {
                         "success":True,
                         "analysis_prompt":request.prompt,
                         "analysis_id":analysis_id,
                         "response_df":final_state.get("response_df").to_dict(),
                         "echart_code":final_state.get("echart_code"),
-                        "designed_echart_code":final_state.get("designed_echart_code"),
+                        "designed_echart_code": designed_echart_code,
                         "analysis_duration":time.time() - analysis_start_time,
                         
                     }

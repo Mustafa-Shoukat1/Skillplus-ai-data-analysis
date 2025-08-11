@@ -253,7 +253,10 @@ ECHARTS_CODE_MERGE_PROMPT = PromptTemplate(
     - Return ONLY the updated SAMPLE option block from "{{" to the matching "}};".
     - Do NOT include any code before or after the option block.
     - Preserve the SAMPLE structure and all non-data values exactly; only transplant original data points.
-
+    - NOTE: Do not include ``` ``` code fences 
+    - NOTE: Do not include any comments or explanations
+    - NOTE: Do not include any whitespace or empty lines
+    - NOTE: Do not add option= 
     --- PREVIOUS CODE START ---
     {previous_code}
     --- PREVIOUS CODE END ---

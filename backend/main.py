@@ -9,7 +9,7 @@ import time
 from core.config import settings
 from core.database import init_db
 from core.logger import logger
-from routes import auth, uploads, data_analysis, templates
+from routes import auth, uploads, data_analysis, templates, metadata
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -106,6 +106,7 @@ app.include_router(auth.router, prefix=settings.API_PREFIX)
 app.include_router(uploads.router, prefix=settings.API_PREFIX)
 app.include_router(data_analysis.router, prefix=settings.API_PREFIX)
 app.include_router(templates.router, prefix=settings.API_PREFIX)
+app.include_router(metadata.router, prefix=settings.API_PREFIX)
 
 def main():
     import uvicorn

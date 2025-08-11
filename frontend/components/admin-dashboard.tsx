@@ -4,12 +4,14 @@ import { useState } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Upload, Bot, Users, FileText, Brain, CheckCircle, TrendingUp, Eye, EyeOff, ToggleLeft, ToggleRight } from "lucide-react"
+import { Upload, Bot, Users, FileText, Brain, CheckCircle, TrendingUp, Eye, EyeOff, ToggleLeft, ToggleRight, Settings } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import FileUpload from "./file-upload"
 import UserManagement from "./user-management"
 import AIAnalysisGenerator from "./ai-analysis-generator"
+import AdvancedAnalysisForm from "./advanced-analysis-form"
 import VisualizationLoader from "./visualization-loader"
+import EChartsRenderer from "./echarts-renderer"
 import { toggleAnalysisVisibility } from "@/lib/api"
 
 interface AdminDashboardProps {
@@ -59,6 +61,8 @@ export default function AdminDashboard({
         return <Upload className="h-4 w-4" />
       case "ai-analysis":
         return <Bot className="h-4 w-4" />
+      case "advanced-analysis":
+        return <Settings className="h-4 w-4" />
       case "users":
         return <Users className="h-4 w-4" />
       case "reports":
@@ -234,6 +238,13 @@ export default function AdminDashboard({
               <span>AI Analysis</span>
             </TabsTrigger>
             <TabsTrigger
+              value="advanced-analysis"
+              className="flex items-center space-x-2 data-[state=active]:bg-green-500/20 data-[state=active]:text-white text-gray-300"
+            >
+              {getTabIcon("advanced-analysis")}
+              <span>Advanced Analysis</span>
+            </TabsTrigger>
+            <TabsTrigger
               value="users"
               className="flex items-center space-x-2 data-[state=active]:bg-green-500/20 data-[state=active]:text-white text-gray-300"
             >
@@ -285,12 +296,20 @@ export default function AdminDashboard({
             />
           </TabsContent>
 
+          {/* Advanced Analysis Tab - NEW */}
+          <TabsContent value="advanced-analysis" className="space-y-6">
+            <AdvancedAnalysisForm
+              uploadedFileId={uploadedFileId}
+              onAnalysisGenerated={onAnalysisGenerated}
+            />
+          </TabsContent>
+
           {/* User Management Tab */}
           <TabsContent value="users" className="space-y-6">
             <UserManagement currentUser={user} users={users} onAddUser={onAddUser} onDeleteUser={onDeleteUser} />
           </TabsContent>
 
-          {/* Reports Tab - ENHANCED with visibility controls for all analysis types */}
+          {/* Reports Tab - Enhanced with ECharts rendering */}
           <TabsContent value="reports" className="space-y-6">
             <Card className="glass border-white/20">
               <CardHeader>
@@ -304,10 +323,10 @@ export default function AdminDashboard({
                 {analyses.length === 0 ? (
                   <div className="text-center py-12">
                     <h3 className="text-lg font-medium text-white mb-2">No analyses generated yet</h3>
-                    <p className="text-gray-400">Use the AI Analysis tab to generate your first report</p>
+                    <p className="text-gray-400">Use the AI Analysis or Advanced Analysis tabs to generate your first report</p>
                   </div>
                 ) : (
-                  /* Grid Layout for Reports */
+                  /* Grid Layout for Reports with Enhanced ECharts Support */
                   <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
                     {analyses.map((analysis, index) => {
                       const analysisId = analysis.analysis_id || analysis.analysisId || analysis.id?.toString() || `temp_${index}`
@@ -401,6 +420,64 @@ export default function AdminDashboard({
 
                           {/* Visualization Preview (if available and visible) */}
                           {analysis.visualizationHtml && isVisible && (
+                            <div className="mb-3 p-3 bg-purple-500/10 rounded-lg border border-purple-500/30">
+                              <div className="flex items-center justify-between mb-2">
+                                <h4 className="font-semibold text-purple-300 text-sm flex items-center">
+                                  <TrendingUp className="h-4 w-4 mr-1" />
+                                  Visualization Preview
+                                </h4>
+                                <Button
+                                  size="sm"
+                                  onClick={() => handleDownloadChart(analysis)}
+                                  className="bg-purple-600 hover:bg-purple-700 text-white text-xs"
+                                >
+                                  <Eye className="h-3 w-3 mr-1" />
+                                  Download
+                                </Button>
+                              </div>
+                              <div className="bg-white rounded-lg p-2">
+                                {analysis.visualizationHtml === "stored_separately" ? (
+                                  <VisualizationLoader analysisId={analysis.visualizationId || analysis.analysisId} />
+                                ) : (
+                                  <iframe
+                                    srcDoc={analysis.visualizationHtml}
+                                    className="w-full h-48 border-0 rounded"
+                                    sandbox="allow-scripts allow-same-origin"
+                                    title={`Visualization for ${analysis.title}`}
+                                  />
+                                )}
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Enhanced Visualization Preview with ECharts Renderer */}
+                          {analysis.backendResult?.designed_echart_code && isVisible && (
+                            <div className="mb-3 p-3 bg-purple-500/10 rounded-lg border border-purple-500/30">
+                              <div className="flex items-center justify-between mb-2">
+                                <h4 className="font-semibold text-purple-300 text-sm flex items-center">
+                                  <TrendingUp className="h-4 w-4 mr-1" />
+                                  Enhanced Visualization
+                                </h4>
+                                <Button
+                                  size="sm"
+                                  onClick={() => handleDownloadChart(analysis)}
+                                  className="bg-purple-600 hover:bg-purple-700 text-white text-xs"
+                                >
+                                  <Eye className="h-3 w-3 mr-1" />
+                                  Download
+                                </Button>
+                              </div>
+                              <div className="bg-white rounded-lg p-2">
+                                <EChartsRenderer 
+                                  optionCode={analysis.backendResult.designed_echart_code}
+                                  height="300px"
+                                />
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Fallback to regular visualization if no designed code */}
+                          {!analysis.backendResult?.designed_echart_code && analysis.visualizationHtml && isVisible && (
                             <div className="mb-3 p-3 bg-purple-500/10 rounded-lg border border-purple-500/30">
                               <div className="flex items-center justify-between mb-2">
                                 <h4 className="font-semibold text-purple-300 text-sm flex items-center">

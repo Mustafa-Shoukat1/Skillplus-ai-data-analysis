@@ -553,3 +553,198 @@ export const getTemplateCategories = async (): Promise<ApiResponse> => {
     }
   }
 }
+
+// Sheet and Graph Type APIs - UPDATED
+export const getAvailableSheets = async (fileId: string): Promise<ApiResponse> => {
+  try {
+    console.log("API: Getting sheets for file:", fileId)
+    
+    const response = await fetch(`${API_BASE_URL}/uploads/${fileId}/sheets`, {
+      method: 'GET',
+      headers: {
+        'Accept': 'application/json',
+      },
+      credentials: 'include',
+    })
+
+    console.log("API: Sheets response status:", response.status)
+
+    if (!response.ok) {
+      let errorDetail = 'Failed to get available sheets'
+      try {
+        const errorData = await response.json()
+        errorDetail = errorData.detail || errorDetail
+      } catch {
+        errorDetail = `HTTP ${response.status}: ${response.statusText}`
+      }
+      throw new Error(errorDetail)
+    }
+
+    const data = await response.json()
+    console.log("API: Sheets data received:", data)
+
+    return {
+      success: true,
+      data: data
+    }
+  } catch (error) {
+    console.error('API: Get sheets error:', error)
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to get sheets'
+    }
+  }
+}
+
+export const getAvailableGraphTypes = async (): Promise<ApiResponse> => {
+  try {
+    console.log("API: Getting available graph types")
+    
+    const response = await fetch(`${API_BASE_URL}/analysis/graph-types`, {
+      method: 'GET',
+      headers: {
+        'Accept': 'application/json',
+      },
+      credentials: 'include',
+    })
+
+    console.log("API: Graph types response status:", response.status)
+
+    if (!response.ok) {
+      let errorDetail = 'Failed to get graph types'
+      try {
+        const errorData = await response.json()
+        errorDetail = errorData.detail || errorDetail
+      } catch {
+        errorDetail = `HTTP ${response.status}: ${response.statusText}`
+      }
+      throw new Error(errorDetail)
+    }
+
+    const data = await response.json()
+    console.log("API: Graph types data received:", data)
+
+    return {
+      success: true,
+      data: data
+    }
+  } catch (error) {
+    console.error('API: Get graph types error:', error)
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to get graph types'
+    }
+  }
+}
+
+// New metadata APIs
+export const getAnalysisTypes = async (): Promise<ApiResponse> => {
+  try {
+    const response = await fetch(`${API_BASE_URL}/metadata/analysis-types`, {
+      method: 'GET',
+      headers: {
+        'Accept': 'application/json',
+      },
+      credentials: 'include',
+    })
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`)
+    }
+
+    const data = await response.json()
+    return {
+      success: true,
+      data: data
+    }
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to get analysis types'
+    }
+  }
+}
+
+export const getAvailableModels = async (): Promise<ApiResponse> => {
+  try {
+    const response = await fetch(`${API_BASE_URL}/metadata/models`, {
+      method: 'GET',
+      headers: {
+        'Accept': 'application/json',
+      },
+      credentials: 'include',
+    })
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`)
+    }
+
+    const data = await response.json()
+    return {
+      success: true,
+      data: data
+    }
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to get models'
+    }
+  }
+}
+
+// Enhanced analysis API with new parameters
+export const startAdvancedAnalysis = async (
+  fileId: string,
+  prompt: string,
+  options: {
+    sheet?: string
+    graphType?: string
+    analysisType?: 'skill' | 'gap'
+    echartSampleCode?: string
+    model?: string
+  }
+): Promise<ApiResponse> => {
+  try {
+    console.log("API: Starting advanced analysis request...")
+    
+    const response = await fetch(`${API_BASE_URL}/analysis/analyze/${fileId}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+      },
+      credentials: 'include',
+      body: JSON.stringify({
+        prompt,
+        model: options?.model || 'claude-3-7-sonnet-20250219',
+        graph_type: options?.graphType,
+        sheet: options?.sheet,
+        echart_sample_code: options?.echartSampleCode,
+        analysis_type: options?.analysisType,
+      }),
+    })
+
+    if (!response.ok) {
+      let errorDetail = 'Failed to start analysis'
+      try {
+        const errorData = await response.json()
+        errorDetail = errorData.detail || errorDetail
+      } catch {
+        errorDetail = `HTTP ${response.status}: ${response.statusText}`
+      }
+      throw new Error(errorDetail)
+    }
+
+    const data = await response.json()
+    return {
+      success: true,
+      data: data
+    }
+  } catch (error) {
+    console.error('API: Advanced analysis error:', error)
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to start analysis'
+    }
+  }
+}

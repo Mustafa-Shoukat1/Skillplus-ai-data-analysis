@@ -574,3 +574,60 @@ async def delete_file(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to delete file"
         )
+
+@router.get("/{file_id}/sheets")
+async def get_file_sheets(
+    file_id: str,
+    db: AsyncSession = Depends(get_async_db_dependency)
+):
+    """Get available sheets from an uploaded Excel file"""
+    try:
+        # Get file from database
+        result = await db.execute(
+            select(UploadedFile).where(UploadedFile.file_id == file_id)
+        )
+        file_obj = result.scalar_one_or_none()
+        
+        if not file_obj:
+            raise HTTPException(status_code=404, detail="File not found")
+        
+        # Check if file exists on disk
+        if not os.path.exists(file_obj.file_path):
+            raise HTTPException(status_code=404, detail="Physical file not found")
+
+        import pandas as pd
+        excel_file = pd.ExcelFile(file_obj.file_path)
+        sheet_names = excel_file.sheet_names
+        
+        # Get sheet metadata
+        sheets_info = []
+        for sheet_name in sheet_names:
+            try:
+                df = pd.read_excel(file_obj.file_path, sheet_name=sheet_name, skiprows=4, nrows=0)
+                sheets_info.append({
+                    "name": sheet_name,
+                    "columns": len(df.columns),
+                    "column_names": df.columns.tolist()[:10]  # First 10 columns
+                })
+            except Exception as e:
+                sheets_info.append({
+                    "name": sheet_name,
+                    "columns": 0,
+                    "column_names": [],
+                    "error": str(e)
+                })
+        
+        return {
+            "success": True,
+            "data": {
+                "sheets": sheet_names,
+                "sheets_info": sheets_info,
+                "total_sheets": len(sheet_names)
+            }
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting sheets for file {file_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to read file sheets: {str(e)}")
