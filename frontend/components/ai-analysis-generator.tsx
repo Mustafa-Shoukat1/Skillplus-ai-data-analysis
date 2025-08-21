@@ -1265,10 +1265,10 @@ export default function AIAnalysisGenerator({ csvData, onAnalysisGenerated, anal
             {viewLayout === 'grid' ? (
               /* Grid Layout */
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {displayAnalyses.map((analysis, index) => {
+                {displayAnalyses.map((analysis: any, index: number) => {
                   const analysisId = analysis.analysis_id
                   const displayId = analysisId.includes("analysis_") ? analysisId.substr(-8) : analysisId
-                  const isActive = activeStates[analysisId] !== false  // Changed variable name
+                  const isActive = activeStates[analysisId] !== false
                   const isExpanded = expandedAnalyses[analysisId] || false
                   
                   return (
@@ -1474,7 +1474,7 @@ export default function AIAnalysisGenerator({ csvData, onAnalysisGenerated, anal
             ) : (
               /* List Layout */
               <div className="space-y-4">
-                {displayAnalyses.map((analysis, index) => {
+                {displayAnalyses.map((analysis: any, index: number) => {
                   const analysisId = analysis.analysis_id
                   const displayId = analysisId.includes("analysis_") ? analysisId.substr(-8) : analysisId
                   const isActive = activeStates[analysisId] !== false

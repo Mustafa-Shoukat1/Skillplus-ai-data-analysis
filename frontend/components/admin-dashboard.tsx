@@ -1,10 +1,10 @@
 "use client"
 
-import { useState } from "react"
+import React, { useState, useEffect } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Upload, Bot, Users, FileText, Brain, CheckCircle, TrendingUp, Eye, EyeOff, ToggleLeft, ToggleRight, Settings, Expand, X } from "lucide-react"
+import { Upload, Bot, Users, FileText, Brain, CheckCircle, TrendingUp, Eye, EyeOff, ToggleLeft, ToggleRight, Settings, Expand, X, RefreshCw, BarChart3, Activity } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import FileUpload from "./file-upload"
 import UserManagement from "./user-management"
@@ -13,6 +13,7 @@ import AdvancedAnalysisForm from "./advanced-analysis-form"
 import VisualizationLoader from "./visualization-loader"
 import EChartsRenderer from "./echarts-renderer"
 import EnhancedAdminPanel from "./enhanced-admin-panel"
+import DashboardAnalysis from "./dashboard-analysis"
 import { toggleAnalysisVisibility } from "@/lib/api"
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api'
 
@@ -78,14 +79,31 @@ export default function AdminDashboard({
   const [activeTab, setActiveTab] = useState("upload")
   const [uploadedFileId, setUploadedFileId] = useState<string>("")
   const [analyses, setAnalyses] = useState<any[]>(initialAnalyses)
+  const [analysisHistory, setAnalysisHistory] = useState<any[]>([])
+  const [selectedAnalysisId, setSelectedAnalysisId] = useState<string | null>(null)
+  const [analysisDetails, setAnalysisDetails] = useState<any>(null)
+  const [loadingHistory, setLoadingHistory] = useState(false)
+  const [loadingDetails, setLoadingDetails] = useState(false)
 
   // Load file ID from localStorage on component mount
-  useState(() => {
+  useEffect(() => {
     const savedFileId = localStorage.getItem("uploadedFileId")
     if (savedFileId) {
       setUploadedFileId(savedFileId)
     }
-  })
+  }, [])
+
+  // Load analysis history on component mount
+  useEffect(() => {
+    loadAnalysisHistory()
+  }, [])
+
+  // Load analysis details when selectedAnalysisId changes
+  useEffect(() => {
+    if (selectedAnalysisId) {
+      loadAnalysisDetails(selectedAnalysisId)
+    }
+  }, [selectedAnalysisId])
 
   const handleDataLoaded = (data: any[], departments: string[], analytics: any, fileId?: string) => {
     onDataLoaded(data, departments, analytics)
@@ -93,6 +111,57 @@ export default function AdminDashboard({
       setUploadedFileId(fileId)
       localStorage.setItem("uploadedFileId", fileId)
     }
+  }
+
+  const loadAnalysisHistory = async () => {
+    setLoadingHistory(true)
+    try {
+      const response = await fetch(`${API_BASE_URL}/analysis/history`)
+      const data = await response.json()
+      
+      if (data.success) {
+        setAnalysisHistory(data.data || [])
+        // Auto-select the most recent analysis
+        if (data.data && data.data.length > 0) {
+          setSelectedAnalysisId(data.data[0].analysis_id)
+        }
+      }
+    } catch (error) {
+      console.error("Failed to load analysis history:", error)
+    } finally {
+      setLoadingHistory(false)
+    }
+  }
+
+  const loadAnalysisDetails = async (analysisId: string) => {
+    setLoadingDetails(true)
+    try {
+      const response = await fetch(`${API_BASE_URL}/analysis/result/db/${encodeURIComponent(analysisId)}`)
+      const data = await response.json()
+      
+      if (data.success) {
+        setAnalysisDetails(data.data)
+        // Store the current analysis_id for viewer dashboard
+        localStorage.setItem('currentAnalysisId', analysisId)
+      }
+    } catch (error) {
+      console.error("Failed to load analysis details:", error)
+      setAnalysisDetails(null)
+    } finally {
+      setLoadingDetails(false)
+    }
+  }
+
+  const handleDashboardAnalysisComplete = (dashboardData: any, analysisId?: string) => {
+    console.log("Dashboard analysis completed:", dashboardData)
+    // Store the analysis_id globally for viewer access if provided
+    if (analysisId) {
+      localStorage.setItem('currentAnalysisId', analysisId)
+    } else {
+      console.warn('handleDashboardAnalysisComplete called without an analysisId')
+    }
+    // Refresh analysis history
+    loadAnalysisHistory()
   }
 
   const getTabIcon = (tabId: string) => {
@@ -107,6 +176,8 @@ export default function AdminDashboard({
         return <Users className="h-4 w-4" />
       case "reports":
         return <FileText className="h-4 w-4" />
+      case "dashboard-analysis":
+        return <BarChart3 className="h-4 w-4" />
       default:
         return null
     }
@@ -122,8 +193,6 @@ export default function AdminDashboard({
 
     return { total, recent }
   }
-
-  const stats = getAnalysisStats()
 
   // Enhanced helper function for downloading charts with better error handling
   const handleDownloadChart = (analysis: any) => {
@@ -255,387 +324,318 @@ export default function AdminDashboard({
       {/* Animated Background */}
       <div className="animated-bg"></div>
 
-      <div className="relative z-10 p-6">
-        {/* Header */}
-        <div className="mb-8">
-          <div className="flex items-center justify-between">
-            <div>
-              <h1 className="text-3xl font-bold text-white gradient-text-visible">Admin Control Center</h1>
-              <p className="text-gray-300 mt-2">Manage data, generate AI insights, and control user access</p>
-            </div>
-
-            {/* Quick Stats */}
-            <div className="flex items-center space-x-4">
-              <div className="glass px-4 py-3 rounded-xl">
-                <div className="flex items-center space-x-3">
-                  <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-purple-600 rounded-lg flex items-center justify-center">
-                    <FileText className="h-5 w-5 text-white" />
-                  </div>
-                  <div>
-                    <div className="text-lg font-bold text-white">{csvData.length}</div>
-                    <div className="text-xs text-gray-300">CSV Records</div>
-                  </div>
-                </div>
+      <div className="relative z-10 flex">
+        {/* Sidebar for Analysis History */}
+        <div className="w-80 bg-black/30 backdrop-blur-sm border-r border-white/10 h-screen overflow-y-auto">
+          <div className="p-4 border-b border-white/10">
+            <h2 className="text-white font-semibold flex items-center space-x-2">
+              <BarChart3 className="h-5 w-5" />
+              <span>Analysis History</span>
+            </h2>
+            <Button
+              onClick={loadAnalysisHistory}
+              size="sm"
+              className="mt-2 bg-blue-600 hover:bg-blue-700 text-white w-full"
+            >
+              <RefreshCw className="h-4 w-4 mr-2" />
+              Refresh
+            </Button>
+          </div>
+          
+          <div className="p-4">
+            {loadingHistory ? (
+              <div className="text-center text-gray-400">
+                <Activity className="h-6 w-6 mx-auto mb-2 animate-spin" />
+                Loading...
               </div>
-
-              <div className="glass px-4 py-3 rounded-xl">
-                <div className="flex items-center space-x-3">
-                  <div className="w-10 h-10 bg-gradient-to-br from-green-500 to-emerald-600 rounded-lg flex items-center justify-center">
-                    <Brain className="h-5 w-5 text-white" />
-                  </div>
-                  <div>
-                    <div className="text-lg font-bold text-white">{stats.total}</div>
-                    <div className="text-xs text-gray-300">AI Analyses</div>
-                  </div>
-                </div>
+            ) : analysisHistory.length === 0 ? (
+              <div className="text-center text-gray-400">
+                <Brain className="h-8 w-8 mx-auto mb-2" />
+                <p className="text-sm">No analyses yet</p>
               </div>
-
-              <div className="glass px-4 py-3 rounded-xl">
-                <div className="flex items-center space-x-3">
-                  <div className="w-10 h-10 bg-gradient-to-br from-orange-500 to-red-600 rounded-lg flex items-center justify-center">
-                    <Users className="h-5 w-5 text-white" />
-                  </div>
-                  <div>
-                    <div className="text-lg font-bold text-white">
-                      {users.filter((u) => u.role === "viewer").length}
+            ) : (
+              <div className="space-y-2">
+                {analysisHistory.map((analysis) => (
+                  <div
+                    key={analysis.analysis_id}
+                    onClick={() => setSelectedAnalysisId(analysis.analysis_id)}
+                    className={`p-3 rounded-lg cursor-pointer transition-all duration-200 ${
+                      selectedAnalysisId === analysis.analysis_id
+                        ? 'bg-blue-500/20 border border-blue-500/30'
+                        : 'bg-white/5 hover:bg-white/10 border border-white/10'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between mb-1">
+                      <Badge className="bg-blue-500/20 text-blue-300 border-blue-500/30 text-xs">
+                        {analysis.analysis_id.substr(-8)}
+                      </Badge>
+                      <Badge className={`text-xs ${
+                        analysis.is_active 
+                          ? 'bg-green-500/20 text-green-300 border-green-500/30'
+                          : 'bg-gray-500/20 text-gray-300 border-gray-500/30'
+                      }`}>
+                        {analysis.is_active ? 'Active' : 'Inactive'}
+                      </Badge>
                     </div>
-                    <div className="text-xs text-gray-300">Viewers</div>
+                    <div className="text-white text-sm font-medium mb-1">
+                      Dashboard Analysis
+                    </div>
+                    <div className="text-gray-400 text-xs">
+                      {new Date(analysis.created_at).toLocaleDateString()}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Main Content */}
+        <div className="flex-1 p-6">
+          {/* Header */}
+          <div className="mb-8">
+            <div className="flex items-center justify-between">
+              <div>
+                <h1 className="text-3xl font-bold text-white gradient-text-visible">Admin Control Center</h1>
+                <p className="text-gray-300 mt-2">Manage data, generate AI insights, and control user access</p>
+              </div>
+
+              {/* Quick Stats */}
+              <div className="flex items-center space-x-4">
+                <div className="glass px-4 py-3 rounded-xl">
+                  <div className="flex items-center space-x-3">
+                    <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-purple-600 rounded-lg flex items-center justify-center">
+                      <FileText className="h-5 w-5 text-white" />
+                    </div>
+                    <div>
+                      <div className="text-lg font-bold text-white">{csvData.length}</div>
+                      <div className="text-xs text-gray-300">CSV Records</div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="glass px-4 py-3 rounded-xl">
+                  <div className="flex items-center space-x-3">
+                    <div className="w-10 h-10 bg-gradient-to-br from-green-500 to-emerald-600 rounded-lg flex items-center justify-center">
+                      <Brain className="h-5 w-5 text-white" />
+                    </div>
+                    <div>
+                      <div className="text-lg font-bold text-white">{analysisHistory.length}</div>
+                      <div className="text-xs text-gray-300">Analyses</div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="glass px-4 py-3 rounded-xl">
+                  <div className="flex items-center space-x-3">
+                    <div className="w-10 h-10 bg-gradient-to-br from-orange-500 to-red-600 rounded-lg flex items-center justify-center">
+                      <Users className="h-5 w-5 text-white" />
+                    </div>
+                    <div>
+                      <div className="text-lg font-bold text-white">
+                        {users.filter((u) => u.role === "viewer").length}
+                      </div>
+                      <div className="text-xs text-gray-300">Viewers</div>
+                    </div>
                   </div>
                 </div>
               </div>
             </div>
           </div>
-        </div>
 
-        {/* Main Content */}
-        <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-          <TabsList className="glass border-white/20 bg-white/5 p-1">
-            <TabsTrigger
-              value="upload"
-              className="flex items-center space-x-2 data-[state=active]:bg-blue-500/20 data-[state=active]:text-white text-gray-300"
-            >
-              {getTabIcon("upload")}
-              <span>Data Upload</span>
-            </TabsTrigger>
+          {/* Main Content Tabs */}
+          <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
+            <TabsList className="glass border-white/20 bg-white/5 p-1">
+              <TabsTrigger
+                value="upload"
+                className="flex items-center space-x-2 data-[state=active]:bg-blue-500/20 data-[state=active]:text-white text-gray-300"
+              >
+                {getTabIcon("upload")}
+                <span>Data Upload</span>
+              </TabsTrigger>
 
-            <TabsTrigger
-              value="enhanced-panel"
-              className="flex items-center space-x-2 data-[state=active]:bg-purple-500/20 data-[state=active]:text-white text-gray-300"
-            >
-              <Settings className="h-4 w-4" />
-              <span>AI Analysis</span>
-            </TabsTrigger>
+              <TabsTrigger
+                value="dashboard-analysis"
+                className="flex items-center space-x-2 data-[state=active]:bg-purple-500/20 data-[state=active]:text-white text-gray-300"
+              >
+                {getTabIcon("dashboard-analysis")}
+                <span>Dashboard Analysis</span>
+              </TabsTrigger>
 
-            <TabsTrigger
-              value="users"
-              className="flex items-center space-x-2 data-[state=active]:bg-green-500/20 data-[state=active]:text-white text-gray-300"
-            >
-              {getTabIcon("users")}
-              <span>User Management</span>
-            </TabsTrigger>
-            <TabsTrigger
-              value="reports"
-              className="flex items-center space-x-2 data-[state=active]:bg-orange-500/20 data-[state=active]:text-white text-gray-300"
-            >
-              {getTabIcon("reports")}
-              <span>Analysis Reports</span>
-            </TabsTrigger>
-          </TabsList>
+              <TabsTrigger
+                value="users"
+                className="flex items-center space-x-2 data-[state=active]:bg-green-500/20 data-[state=active]:text-white text-gray-300"
+              >
+                {getTabIcon("users")}
+                <span>User Management</span>
+              </TabsTrigger>
 
-          {/* Data Upload Tab */}
-          <TabsContent value="upload" className="space-y-6">
-            <Card className="glass border-white/20">
-              <CardHeader>
-                <CardTitle className="text-white flex items-center space-x-2">
-                  <Upload className="h-5 w-5" />
-                  <span>File Upload & Management</span>
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <FileUpload onDataLoaded={handleDataLoaded} />
+              <TabsTrigger
+                value="analysis-details"
+                className="flex items-center space-x-2 data-[state=active]:bg-orange-500/20 data-[state=active]:text-white text-gray-300"
+              >
+                {getTabIcon("reports")}
+                <span>Analysis Details</span>
+              </TabsTrigger>
+            </TabsList>
 
-                {/* Display file ID info */}
-                {uploadedFileId && (
-                  <div className="mt-4 p-3 bg-green-500/10 rounded-lg border border-green-500/20">
-                    <p className="text-green-300 text-sm">
-                      File uploaded successfully (ID: {uploadedFileId.substring(0, 8)}...)
-                    </p>
-                  </div>
-                )}
+            {/* Data Upload Tab */}
+            <TabsContent value="upload" className="space-y-6">
+              <Card className="glass border-white/20">
+                <CardHeader>
+                  <CardTitle className="text-white flex items-center space-x-2">
+                    <Upload className="h-5 w-5" />
+                    <span>File Upload & Management</span>
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <FileUpload onDataLoaded={handleDataLoaded} />
+
+                  {/* Display file ID info */}
+                  {uploadedFileId && (
+                    <div className="mt-4 p-3 bg-green-500/10 rounded-lg border border-green-500/20">
+                      <p className="text-green-300 text-sm">
+                        File uploaded successfully (ID: {uploadedFileId.substring(0, 8)}...)
+                      </p>
+                    </div>
+                  )}
 
                 
-              </CardContent>
-            </Card>
-          </TabsContent>
+                </CardContent>
+              </Card>
+            </TabsContent>
 
-          {/* AI Analysis Tab */}
-          <TabsContent value="ai-analysis" className="space-y-6">
-            <AIAnalysisGenerator 
-              csvData={csvData} 
-              onAnalysisGenerated={onAnalysisGenerated} 
-              analyses={analyses}
-              uploadedFileId={uploadedFileId}
-            />
-          </TabsContent>
+            {/* Dashboard Analysis Tab */}
+            <TabsContent value="dashboard-analysis" className="space-y-6">
+              <DashboardAnalysis
+                uploadedFileId={uploadedFileId}
+                onAnalysisComplete={(dashboardData, analysisId) => {
+                  handleDashboardAnalysisComplete(dashboardData, analysisId)
+                }}
+              />
+            </TabsContent>
 
-          {/* Advanced Analysis Tab - NEW */}
-          <TabsContent value="advanced-analysis" className="space-y-6">
-            <AdvancedAnalysisForm
-              uploadedFileId={uploadedFileId}
-              onAnalysisGenerated={onAnalysisGenerated}
-            />
-          </TabsContent>
+            {/* User Management Tab */}
+            <TabsContent value="users" className="space-y-6">
+              <UserManagement currentUser={user} users={users} onAddUser={onAddUser} onDeleteUser={onDeleteUser} />
+            </TabsContent>
 
-          {/* Enhanced Admin Panel Tab - NEW */}
-          <TabsContent value="enhanced-panel" className="space-y-6">
-            <EnhancedAdminPanel
-              uploadedFileId={uploadedFileId}
-              onAnalysisGenerated={(analysis) => {
-                setAnalyses(prev => [analysis, ...prev])
-                onAnalysisGenerated(analysis)
-              }}
-            />
-          </TabsContent>
-
-          {/* User Management Tab */}
-          <TabsContent value="users" className="space-y-6">
-            <UserManagement currentUser={user} users={users} onAddUser={onAddUser} onDeleteUser={onDeleteUser} />
-          </TabsContent>
-
-          {/* Reports Tab - Enhanced with expand buttons */}
-          <TabsContent value="reports" className="space-y-6">
-            <Card className="glass border-white/20">
-              <CardHeader>
-                <CardTitle className="text-white flex items-center space-x-2">
-                  <FileText className="h-5 w-5" />
-                  <span>Analysis Reports ({analyses.length})</span>
-                </CardTitle>
-                <p className="text-gray-400">Manage analysis visibility and view results</p>
-              </CardHeader>
-              <CardContent>
-                {analyses.length === 0 ? (
-                  <div className="text-center py-12">
-                    <h3 className="text-lg font-medium text-white mb-2">No analyses generated yet</h3>
-                    <p className="text-gray-400">Use the AI Analysis or Advanced Analysis tabs to generate your first report</p>
-                  </div>
-                ) : (
-                  <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-                    {analyses.map((analysis, index) => {
-                      const analysisId = analysis.analysis_id || analysis.analysisId || analysis.id?.toString() || `temp_${index}`
-                      const displayId = analysisId.includes('analysis_') ? analysisId.substr(-8) : analysisId
-                      const isVisible = analysis.is_visible !== false
-                      
-                      return (
-                        <div key={analysisId} className={`glass rounded-lg p-4 border ${isVisible ? 'border-green-500/30 bg-green-500/5' : 'border-gray-500/30 bg-gray-500/5'}`}>
-                          {/* Enhanced Header with Better Controls */}
-                          <div className="flex justify-between items-start mb-3">
-                            <div className="flex-1">
-                              <div className="flex items-center space-x-3 mb-2">
-                                <h3 className="text-lg font-semibold text-white">{analysis.title}</h3>
-                                <Badge className="bg-blue-500/20 text-blue-300 border-blue-500/30 font-mono text-xs">
-                                  {displayId}
-                                </Badge>
-                              </div>
-                              
-                              {/* Template and Type Info */}
-                              <div className="flex items-center space-x-2 mb-2">
-                                {analysis.templateId && (
-                                  <Badge className="bg-purple-500/20 text-purple-300 border-purple-500/30 text-xs">
-                                    Template: {analysis.templateName || analysis.templateId}
-                                  </Badge>
-                                )}
-                                <Badge className={`text-xs ${
-                                  analysis.queryType === 'visualization' 
-                                    ? 'bg-purple-500/20 text-purple-300 border-purple-500/30'
-                                    : 'bg-blue-500/20 text-blue-300 border-blue-500/30'
-                                }`}>
-                                  {analysis.queryType === 'visualization' ? '📊 Visualization' : '📈 General'}
-                                </Badge>
-                              </div>
-                            </div>
-                            
-                            {/* Visibility Toggle - For ALL analysis types */}
-                            <div className="flex flex-col items-center space-y-1">
-                              <Button
-                                size="sm"
-                                onClick={() => handleToggleVisibility(analysisId, !isVisible)}
-                                className={`flex items-center space-x-2 px-3 py-2 ${
-                                  isVisible 
-                                    ? 'bg-green-600 hover:bg-green-700 text-white' 
-                                    : 'bg-gray-600 hover:bg-gray-700 text-gray-300'
-                                }`}
-                              >
-                                {isVisible ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
-                                <span className="text-sm font-medium">
-                                  {isVisible ? 'Public' : 'Private'}
-                                </span>
-                              </Button>
-                              <div className={`text-xs ${isVisible ? 'text-green-400' : 'text-red-400'}`}>
-                                {isVisible ? 'Viewers can see' : 'Hidden from viewers'}
-                              </div>
-                            </div>
+            {/* Analysis Details Tab */}
+            <TabsContent value="analysis-details" className="space-y-6">
+              {selectedAnalysisId ? (
+                <Card className="glass border-white/20">
+                  <CardHeader>
+                    <CardTitle className="text-white flex items-center justify-between">
+                      <div className="flex items-center space-x-2">
+                        <Settings className="h-5 w-5" />
+                        <span>Analysis Details</span>
+                      </div>
+                      <Badge className="bg-blue-500/20 text-blue-300 border-blue-500/30">
+                        {selectedAnalysisId.substr(-8)}
+                      </Badge>
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    {loadingDetails ? (
+                      <div className="text-center py-8">
+                        <Activity className="h-8 w-8 mx-auto mb-2 animate-spin text-blue-500" />
+                        <p className="text-gray-400">Loading analysis details...</p>
+                      </div>
+                    ) : analysisDetails ? (
+                      <div className="space-y-6">
+                        {/* Analysis Metadata */}
+                        <div className="grid grid-cols-2 gap-4">
+                          <div className="p-3 bg-blue-500/10 rounded-lg">
+                            <h4 className="text-blue-300 font-medium mb-1">Analysis ID</h4>
+                            <p className="text-white font-mono text-sm">{analysisDetails.analysis_id}</p>
                           </div>
-
-                          {/* Query Preview */}
-                          <div className="mb-3 p-3 bg-blue-500/10 rounded-lg border border-blue-500/20">
-                            <p className="text-gray-400 text-sm font-medium mb-1">Query:</p>
-                            <p className="text-blue-200 text-sm">{analysis.prompt}</p>
-                          </div>
-
-                          {/* Status Indicators */}
-                          <div className="flex items-center space-x-4 mb-3 text-xs">
-                            <div className="flex items-center space-x-1">
-                              <span className="text-gray-400">Data Points:</span>
-                              <span className="text-white">{analysis.dataPoints}</span>
-                            </div>
-                            {analysis.hasVisualization && (
-                              <span className="text-purple-400 flex items-center">
-                                <TrendingUp className="h-3 w-3 mr-1" />
-                                Has Chart
-                              </span>
-                            )}
-                            {analysis.executionSuccess && (
-                              <span className="text-green-400 flex items-center">
-                                <CheckCircle className="h-3 w-3 mr-1" />
-                                Executed
-                              </span>
-                            )}
-                          </div>
-
-                          {/* Analysis Results Preview */}
-                          {analysis.insights && isVisible && (
-                            <div className="mb-3 p-3 bg-green-500/10 rounded-lg border border-green-500/20">
-                              <h4 className="font-semibold text-green-300 text-sm mb-1">📊 Analysis Results</h4>
-                              <p className="text-green-200 text-sm">{analysis.insights}</p>
-                            </div>
-                          )}
-
-                          {/* Visualization Preview (if available and visible) */}
-                          {analysis.visualizationHtml && isVisible && (
-                            <div className="mb-3 p-3 bg-purple-500/10 rounded-lg border border-purple-500/30">
-                              <div className="flex items-center justify-between mb-2">
-                                <h4 className="font-semibold text-purple-300 text-sm flex items-center">
-                                  <TrendingUp className="h-4 w-4 mr-1" />
-                                  Visualization Preview
-                                </h4>
-                                <Button
-                                  size="sm"
-                                  onClick={() => handleDownloadChart(analysis)}
-                                  className="bg-purple-600 hover:bg-purple-700 text-white text-xs"
-                                >
-                                  <Eye className="h-3 w-3 mr-1" />
-                                  Download
-                                </Button>
-                              </div>
-                              <div className="bg-white rounded-lg p-2">
-                                {analysis.visualizationHtml === "stored_separately" ? (
-                                  <VisualizationLoader analysisId={analysis.visualizationId || analysis.analysisId} />
-                                ) : (
-                                  <iframe
-                                    srcDoc={analysis.visualizationHtml}
-                                    className="w-full h-48 border-0 rounded"
-                                    sandbox="allow-scripts allow-same-origin"
-                                    title={`Visualization for ${analysis.title}`}
-                                  />
-                                )}
-                              </div>
-                            </div>
-                          )}
-
-                          {/* Enhanced Visualization Preview with ECharts Renderer - ENHANCED */}
-                          {analysis.backendResult?.designed_echart_code && isVisible && (
-                            <div className="mb-3 p-3 bg-purple-500/10 rounded-lg border border-purple-500/30">
-                              <div className="flex items-center justify-between mb-2">
-                                <h4 className="font-semibold text-purple-300 text-sm flex items-center">
-                                  <TrendingUp className="h-4 w-4 mr-1" />
-                                  Enhanced Visualization
-                                </h4>
-                                <div className="flex items-center space-x-2">
-                                  <Button
-                                    size="sm"
-                                    onClick={() => openFullScreen(analysis.title, analysis.backendResult.designed_echart_code)}
-                                    className="bg-blue-600 hover:bg-blue-700 text-white text-xs p-1"
-                                    title="Expand to full screen"
-                                  >
-                                    <Expand className="h-3 w-3" />
-                                  </Button>
-                                  <Button
-                                    size="sm"
-                                    onClick={() => handleDownloadChart(analysis)}
-                                    className="bg-purple-600 hover:bg-purple-700 text-white text-xs"
-                                  >
-                                    <Eye className="h-3 w-3 mr-1" />
-                                    Download
-                                  </Button>
-                                </div>
-                              </div>
-                              <div className="bg-white rounded-lg p-2">
-                                <EChartsRenderer 
-                                  optionCode={analysis.backendResult.designed_echart_code}
-                                  height="300px"
-                                />
-                              </div>
-                            </div>
-                          )}
-
-                          {/* Fallback to regular visualization if no designed code - ENHANCED */}
-                          {!analysis.backendResult?.designed_echart_code && analysis.visualizationHtml && isVisible && (
-                            <div className="mb-3 p-3 bg-purple-500/10 rounded-lg border border-purple-500/30">
-                              <div className="flex items-center justify-between mb-2">
-                                <h4 className="font-semibold text-purple-300 text-sm flex items-center">
-                                  <TrendingUp className="h-4 w-4 mr-1" />
-                                  Visualization Preview
-                                </h4>
-                                <div className="flex items-center space-x-2">
-                                  <Button
-                                    size="sm"
-                                    onClick={() => {
-                                      // For iframe content, we can't easily expand, so just show download
-                                      alert("Full screen expansion not available for this chart type. Use download instead.")
-                                    }}
-                                    className="bg-blue-600 hover:bg-blue-700 text-white text-xs p-1"
-                                    title="Expand to full screen"
-                                  >
-                                    <Expand className="h-3 w-3" />
-                                  </Button>
-                                  <Button
-                                    size="sm"
-                                    onClick={() => handleDownloadChart(analysis)}
-                                    className="bg-purple-600 hover:bg-purple-700 text-white text-xs"
-                                  >
-                                    <Eye className="h-3 w-3 mr-1" />
-                                    Download
-                                  </Button>
-                                </div>
-                              </div>
-                              <div className="bg-white rounded-lg p-2">
-                                {analysis.visualizationHtml === "stored_separately" ? (
-                                  <VisualizationLoader analysisId={analysis.visualizationId || analysis.analysisId} />
-                                ) : (
-                                  <iframe
-                                    srcDoc={analysis.visualizationHtml}
-                                    className="w-full h-48 border-0 rounded"
-                                    sandbox="allow-scripts allow-same-origin"
-                                    title={`Visualization for ${analysis.title}`}
-                                  />
-                                )}
-                              </div>
-                            </div>
-                          )}
-
-                          {/* Timestamp */}
-                          <div className="text-xs text-gray-500 text-right">
-                            {analysis.timestamp}
+                          <div className="p-3 bg-green-500/10 rounded-lg">
+                            <h4 className="text-green-300 font-medium mb-1">Created</h4>
+                            <p className="text-white text-sm">
+                              {new Date(analysisDetails.created_at).toLocaleString()}
+                            </p>
                           </div>
                         </div>
-                      )
-                    })}
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          </TabsContent>
-        </Tabs>
+
+                        {/* Dashboard Results Summary */}
+                        {analysisDetails.dashboard_results && (
+                          <div className="space-y-4">
+                            <h3 className="text-white font-semibold text-lg">Dashboard Results Summary</h3>
+                            
+                            {/* Executive Overview */}
+                            {analysisDetails.dashboard_results.executive_overview && (
+                              <div className="p-4 bg-white/5 rounded-lg">
+                                <h4 className="text-white font-medium mb-3">Executive Overview</h4>
+                                <div className="grid grid-cols-2 gap-4 text-sm">
+                                  <div>
+                                    <span className="text-gray-400">Total Employees:</span>
+                                    <span className="text-white ml-2">
+                                      {analysisDetails.dashboard_results.executive_overview.total_employees || 0}
+                                    </span>
+                                  </div>
+                                  <div>
+                                    <span className="text-gray-400">Avg Performance:</span>
+                                    <span className="text-white ml-2">
+                                      {analysisDetails.dashboard_results.executive_overview.average_performance || 0}%
+                                    </span>
+                                  </div>
+                                  <div>
+                                    <span className="text-gray-400">Top Department:</span>
+                                    <span className="text-white ml-2">
+                                      {analysisDetails.dashboard_results.executive_overview.top_performing_department || 'N/A'}
+                                    </span>
+                                  </div>
+                                  <div>
+                                    <span className="text-gray-400">Trend:</span>
+                                    <span className="text-white ml-2 capitalize">
+                                      {analysisDetails.dashboard_results.executive_overview.trend_analysis || 'stable'}
+                                    </span>
+                                  </div>
+                                </div>
+                              </div>
+                            )}
+
+                            {/* Set as Active for Viewers */}
+                            <div className="p-4 bg-green-500/10 rounded-lg border border-green-500/20">
+                              <div className="flex items-center justify-between">
+                                <div>
+                                  <h4 className="text-green-300 font-medium">Viewer Access</h4>
+                                  <p className="text-green-200 text-sm">Make this analysis visible to viewers</p>
+                                </div>
+                                <Button
+                                  onClick={() => {
+                                    localStorage.setItem('currentAnalysisId', selectedAnalysisId)
+                                    alert('Analysis set as active for viewers!')
+                                  }}
+                                  className="bg-green-600 hover:bg-green-700 text-white"
+                                >
+                                  Set as Active
+                                </Button>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="text-center py-8 text-gray-400">
+                        <Brain className="h-8 w-8 mx-auto mb-2" />
+                        <p>Failed to load analysis details</p>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              ) : (
+                <Card className="glass border-white/20">
+                  <CardContent className="text-center py-12">
+                    <Brain className="h-12 w-12 mx-auto mb-4 text-gray-400" />
+                    <h3 className="text-white text-lg font-medium mb-2">No Analysis Selected</h3>
+                    <p className="text-gray-400">Select an analysis from the sidebar to view details</p>
+                  </CardContent>
+                </Card>
+              )}
+            </TabsContent>
+          </Tabs>
+        </div>
       </div>
 
       {/* Full Screen Modal */}
@@ -648,3 +648,4 @@ export default function AdminDashboard({
     </div>
   )
 }
+       

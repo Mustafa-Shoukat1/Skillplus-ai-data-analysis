@@ -1,7 +1,7 @@
 import asyncio
 import os
 import re
-from langchain_anthropic.chat_models import ChatAnthropic
+
 import pandas as pd
 import time
 from datetime import datetime
@@ -13,8 +13,9 @@ import uuid
 from pathlib import Path
 
 from models.database import UploadedFile, AnalysisResult, User
-from models.data_analysis import DataAnalysisRequest, ChartGenerationResponse
-# Replaced legacy graph with new LCEL workflow in route/service implementations
+
+# Replace LCEL with custom workflow
+from agents.graphs.lcel_workflow import DashboardPipeline
 from core.database import get_async_db
 from core.logger import logger, log_exception, log_function_entry, log_function_exit, log_data_info
 
@@ -41,15 +42,12 @@ class DataAnalysisService:
         db: AsyncSession,
         user_id: int,
         file_id: int,
-        user_query: str,
         analysis_data: Dict[str, Any],
-        processing_time: float,
-        model_used: str,
         analysis_id: str = None
     ) -> AnalysisResult:
-        """Save analysis result to database with simplified model"""
+        """Save analysis result to database with custom workflow results"""
         
-        logger.info(f"Saving analysis result to database...")
+        logger.info(f"Saving custom workflow analysis result to database...")
         
         # Use provided analysis_id or generate one
         if analysis_id:
@@ -62,33 +60,16 @@ class DataAnalysisService:
             analysis_id = f"analysis_{timestamp}_{unique_suffix}"
             logger.info(f"Generated new analysis_id: {analysis_id}")
         
-        # Extract essential data from analysis_data
-        echart_code = analysis_data.get("echart_code")
-        designed_echart_code = analysis_data.get("designed_echart_code")
-        response_df = analysis_data.get("response_df")
-        
-        # Convert DataFrame to JSON if it's a DataFrame
-        response_df_json = None
-        if response_df is not None:
-            if hasattr(response_df, 'to_dict'):
-                # Always convert to records (list of dicts)
-                response_df_json = response_df.to_dict('records')
-            elif isinstance(response_df, dict):
-                # Convert dict-of-columns to list of dicts (records)
-                import pandas as pd
-                response_df_json = pd.DataFrame(response_df).to_dict('records')
-            elif isinstance(response_df, list):
-                response_df_json = response_df
-        
+        # Extract data from custom workflow results
+        dashboard_results = analysis_data.get("dashboard_results", {})
+
         try:
             db_result = AnalysisResult(
+                dashboard_results=dashboard_results,
+                analysis_type='dashboard',
                 analysis_id=analysis_id,
                 user_id=user_id,
                 file_id=file_id,
-                query=user_query,
-                echart_code=echart_code,
-                designed_echart_code=designed_echart_code,
-                response_df=response_df_json,
                 is_active=True
             )
             
@@ -96,11 +77,11 @@ class DataAnalysisService:
             await db.commit()
             await db.refresh(db_result)
             
-            logger.info(f"Analysis result saved successfully with ID: {analysis_id}")
+            logger.info(f"Custom workflow analysis result saved successfully with ID: {analysis_id}")
             return db_result
             
         except Exception as e:
-            logger.error(f"Failed to save analysis result: {e}")
+            logger.error(f"Failed to save custom workflow analysis result: {e}")
             await db.rollback()
             raise e
 
@@ -136,16 +117,15 @@ class DataAnalysisService:
     async def run_background_analysis(
         file_id: str,
         user_id: int,
-        request: DataAnalysisRequest,
         result_storage: Dict[str, Any],
         task_id: str,
-        analysis_id: str = None  # Accept pre-generated analysis_id
+        analysis_id: str = None
     ) -> str:
-        """Run analysis in background task with enhanced multi-DataFrame support"""
+        """Run custom workflow analysis in background task"""
         
         log_function_entry(logger, "run_background_analysis", 
                           file_id=file_id, user_id=user_id, task_id=task_id, 
-                          prompt_length=len(request.prompt) if request.prompt else 0)
+        )
         
         start_time = time.time()
         
@@ -154,72 +134,51 @@ class DataAnalysisService:
         
         try:
             async with get_async_db() as db:
-                # Get file with detailed logging
+                # Get file with detailed logging - FIXED: Remove user_id restriction initially
                 logger.info(f"🔍 Looking up file_id: {file_id}")
-                file_obj = await DataAnalysisService.get_file_by_id(db, file_id)
+                file_obj = await DataAnalysisService.get_file_by_id(db, file_id, user_id=None)
                 if not file_obj:
                     logger.error(f"❌ File not found in database: {file_id}")
-                    raise HTTPException(status_code=404, detail="File not found")
+                    # Try alternative query to debug
+                    from sqlalchemy import select
+                    from models.database import UploadedFile
+                    debug_result = await db.execute(select(UploadedFile))
+                    all_files = debug_result.scalars().all()
+                    logger.error(f"Available files: {[f.file_id for f in all_files]}")
+                    raise HTTPException(status_code=404, detail=f"File not found: {file_id}")
                 
                 logger.info(f"✅ File found: {file_obj.original_filename}, path: {file_obj.file_path}")
                 
-                # Verify file exists on disk with detailed logging
+                # Verify file exists on disk
                 if not os.path.exists(file_obj.file_path):
                     logger.error(f"❌ Physical file not found at path: {file_obj.file_path}")
-                    logger.error(f"📁 Current working directory: {os.getcwd()}")
-                    logger.error(f"📁 Directory contents: {os.listdir('.')}")
                     raise HTTPException(status_code=404, detail="Physical file not found")
                 
-                # Load data with enhanced logging and error handling
+                # Load data using the same structure as uploads.py
                 logger.info(f"📂 Loading data from: {file_obj.file_path}")
                 
                 try:
-                    sheets = pd.read_excel(file_obj.file_path, sheet_name=None, skiprows=4)
-
-                    # Get sheet names as a list
-                    sheet_names = list(sheets.keys())
-
-                    # Select sheets 2, 3, 4, and 5 (index 1 to 4)
-                    selected_sheets = {name: sheets[name] for name in sheet_names[1:5]}
-
-                    # List of DataFrames
-                    dfs_list = list(selected_sheets.values())
-
-                    # Total number of sheets selected
-                    total_sheets = len(dfs_list)
-
-                    # Metadata: list of dicts with sheet name, shape, and columns
-                    sheets_metadata = [
-                        {
-                            "sheet_name": name,
-                            "shape": df.shape,
-                            "columns": list(df.columns),
-                            "data_types": dict(df.dtypes.astype(str))
-                        }
-                        for name, df in selected_sheets.items()
-                    ]
-
-                    # Columns from the first selected sheet
-                    columns = list(dfs_list[0].columns) if dfs_list else []
-
-                    # Shapes of all selected sheets
-                    shapes = [df.shape for df in dfs_list]
-
-                    # Data types from the first selected sheet
-                    data_types = dict(dfs_list[0].dtypes.astype(str)) if dfs_list else {}
-
-                    loading_data={
-                        "sheets": sheets,
-                        "selected_sheets": selected_sheets,
-                        "dfs_list": dfs_list,
-                        "sheets_metadata": sheets_metadata,
-                        "total_sheets": total_sheets,
-                        "columns": columns,
-                        "shapes": shapes,
-                        "data_types": data_types
-                    }
-                    logger.info(f"✅ Data loaded successfully. Total DataFrames: {len(dfs_list)}")  
+                    # Check file extension to determine loading method
+                    file_extension = Path(file_obj.file_path).suffix.lower()
                     
+                    if file_extension in ['.xlsx', '.xls']:
+                        # Load comprehensive data similar to uploads.py
+                        sheets = pd.read_excel(file_obj.file_path, sheet_name=None, skiprows=4)
+                        sheet_names = list(sheets.keys())
+
+                        # Select sheets 2, 3, 4, and 5 (index 1 to 4) like in uploads.py
+                        if len(sheet_names) >= 5:
+                            selected_sheets = {name: sheets[name] for name in sheet_names[1:5]}
+                        else:
+                            selected_sheets = sheets
+
+                        # Prepare raw_data in the format expected by custom workflow
+                        raw_data = {
+                            "sheets": selected_sheets
+                        }
+
+                        logger.info(f"✅ Excel data loaded successfully. Total sheets: {len(selected_sheets)}")
+             
                 except Exception as file_load_error:
                     logger.error(f"❌ Failed to load file {file_obj.file_path}")
                     log_exception(logger, "File loading error", file_load_error)
@@ -227,80 +186,47 @@ class DataAnalysisService:
                 
                 result_storage[task_id]["progress"] = 25
                 
-                # Run analysis using LCEL workflow with initial state from frontend-compatible inputs
-                logger.info(f"🤖 Starting LCEL workflow analysis with primary DataFrame...")
+                # Run custom workflow analysis
+                logger.info(f"🤖 Starting custom workflow analysis...")
                 analysis_start_time = time.time()
 
-                if not request.prompt or len(request.prompt.strip()) < 10:
-                    logger.error(f"❌ Invalid prompt: '{request.prompt}' (length: {len(request.prompt) if request.prompt else 0})")
-                    raise HTTPException(status_code=400, detail="Prompt is too short or empty")
-
                 try:
-                    from agents.graphs.lcel_workflow import DataAnalysisWorkflow
-
-                    # Build initial AgentState-compatible dict
-                    initial_state = {
-                        "messages": [request.prompt],
-                        "analysis_type": "",
-                        "sheet": request.sheet,
-                        "graph_type": request.graph_type,
-                        "code_snippet": "",
-                        "review_feedback": "",
-                        "review_approved": False,
-                        "response": {},
-                        "review_attempts": 0,
-                        "max_review_attempts": 3,
-                        "echart_sample_code": request.echart_sample_code,
-                        **loading_data
-                    }
-                    llm=ChatAnthropic(model_name='claude-3-7-sonnet-20250219',max_tokens=60000)
-                    # llm=ChatAnthropic(model_name='claude-3-5-sonnet-20240620')
-                    workflow = DataAnalysisWorkflow(llm=llm)
-                    final_state = await asyncio.get_event_loop().run_in_executor(None, workflow.run, initial_state)
-                    designed_echart_code = final_state.get("designed_echart_code")
-                    # clean code by removing ``` ``` and word option
-                    designed_echart_code = re.sub(r"^```|```$", "", designed_echart_code.strip(), flags=re.MULTILINE)
-
-                    # Remove "option =" and any leading/trailing spaces or semicolons
-                    designed_echart_code = re.sub(r"^\s*option\s*=\s*", "", designed_echart_code.strip())
-                    designed_echart_code = designed_echart_code.rstrip(";").strip()
-
+                    # Initialize custom workflow pipeline
+                    pipeline = DashboardPipeline()
+                    
+                    # Run the analysis
+                    dashboard_state = await pipeline.run_analysis(raw_data)
+                    
+                    # Get formatted results
+                    dashboard_results = pipeline.get_results_summary(dashboard_state)
+                    
                     analysis_result = {
-                        "success":True,
-                        "analysis_prompt":request.prompt,
-                        "analysis_id":analysis_id,
-                        "response_df":final_state.get("response_df").to_dict(),
-                        "echart_code":final_state.get("echart_code"),
-                        "designed_echart_code": designed_echart_code,
-                        "analysis_duration":time.time() - analysis_start_time,
-                        
+                        "success": True,
+                        "analysis_id": analysis_id,
+                        "dashboard_results": dashboard_results,
+                        "analysis_duration": time.time() - analysis_start_time,
                     }
-                    # Normalize output to the expected analysis_result dict including minimal payload
-                   
 
                     analysis_duration = time.time() - analysis_start_time
-                    logger.info(f"✅ LCEL workflow completed in {analysis_duration:.2f} seconds")
+                    logger.info(f"✅ Custom workflow completed in {analysis_duration:.2f} seconds")
 
                 except Exception as workflow_error:
-                    logger.error("❌ LCEL workflow execution failed")
-                    log_exception(logger, "LCEL workflow error", workflow_error)
-                    raise HTTPException(status_code=500, detail=f"AI workflow failed: {str(workflow_error)}")
+                    logger.error("❌ Custom workflow execution failed")
+                    log_exception(logger, "Custom workflow error", workflow_error)
+                    raise HTTPException(status_code=500, detail=f"Custom workflow failed: {str(workflow_error)}")
                 
                 processing_time = time.time() - start_time
                 logger.info(f"⏱️ Total analysis completed in {processing_time:.2f} seconds")
                 
                 result_storage[task_id]["progress"] = 75
                 
-                # Determine overall success with detailed logging
-                overall_success = False
-               
-                # Save to database with enhanced error handling
+                # Save to database
                 try:
-                    logger.info("💾 Saving analysis result to database...")
+                    logger.info("💾 Saving custom workflow analysis result to database...")
                     db_result = await DataAnalysisService.save_analysis_result(
-                        db, user_id, file_obj.id, request.prompt, 
-                        analysis_result, processing_time, request.model,
-                        analysis_id  # Pass the analysis_id
+                        db, user_id, file_obj.id,
+                        analysis_result,
+                        analysis_id
                     )
                     logger.info(f"✅ Analysis saved with ID: {db_result.analysis_id}")
                     
@@ -311,15 +237,13 @@ class DataAnalysisService:
                         "analysis_id": db_result.analysis_id,
                         "database_id": db_result.id,
                         "task_id": task_id,
-                        "success": overall_success,
-                        # Snapshot of agent final state for frontend rendering (response_df, echarts, etc.)
-                        "final_state": final_state,
-                        
+                        "success": True,
+                        "dashboard_results": dashboard_results
                     }
                     
                     total_duration = time.time() - start_time
                     log_function_exit(logger, "run_background_analysis", 
-                                    result=f"success={overall_success}, analysis_id={db_result.analysis_id}", 
+                                    result=f"success=True, analysis_id={db_result.analysis_id}", 
                                     duration=total_duration)
                     
                 except Exception as save_error:
@@ -333,10 +257,8 @@ class DataAnalysisService:
                         "analysis_id": None,
                         "database_id": None,
                         "task_id": task_id,
-                        "success": overall_success,
-                        # Even on failed save, expose the final_state for frontend consumption
-                        "final_state": final_state,
-                        
+                        "success": True,
+                        "dashboard_results": dashboard_results
                     }
             
         except Exception as e:
@@ -369,22 +291,5 @@ class DataAnalysisService:
             .offset(offset)
         )
         return result.scalars().all()
-        
-        return task_id
 
-    @staticmethod
-    async def get_user_analysis_history(
-        db: AsyncSession, 
-        user_id: int, 
-        limit: int = 50, 
-        offset: int = 0
-    ) -> list[AnalysisResult]:
-        """Get user's analysis history"""
-        result = await db.execute(
-            select(AnalysisResult)
-            .where(AnalysisResult.user_id == user_id)
-            .order_by(AnalysisResult.created_at.desc())
-            .limit(limit)
-            .offset(offset)
-        )
-        return result.scalars().all()
+

@@ -1,96 +1,76 @@
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api'
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api"
 
-console.log("API Base URL:", API_BASE_URL) // Debug line
-
-interface ApiResponse<T = any> {
+export interface ApiResponse {
   success: boolean
-  data?: T
+  data?: any
   error?: string
+  message?: string
 }
 
-// File Upload APIs
+async function safeJson(res: Response) {
+  try { return await res.json() } catch { return null }
+}
+
+// --- Basic helpers ---
+export const getActiveDashboardAnalysis = async (): Promise<ApiResponse> => {
+  try {
+    const res = await fetch(`${API_BASE_URL}/analysis/dashboard/active`, { credentials: 'include' })
+    const json = await safeJson(res)
+    if (!res.ok) return { success: false, error: json?.detail || res.statusText }
+    return { success: true, data: json }
+  } catch (error: any) {
+    return { success: false, error: error?.message || "Network error" }
+  }
+}
+
+export const getAnalysisResultFromDB = async (analysisId: string): Promise<ApiResponse> => {
+  try {
+    const res = await fetch(`${API_BASE_URL}/analysis/result/db/${encodeURIComponent(analysisId)}`, { credentials: 'include' })
+    const json = await safeJson(res)
+    if (!res.ok) return { success: false, error: json?.detail || res.statusText }
+    return { success: true, data: json }
+  } catch (error: any) {
+    return { success: false, error: error?.message || "Network error" }
+  }
+}
+
+// File upload helpers (kept minimal — adapt as needed)
 export const uploadFile = async (file: File): Promise<ApiResponse> => {
   try {
-    console.log("🚀 Starting file upload to:", `${API_BASE_URL}/uploads/`)
-    console.log("📁 File details:", {
-      name: file.name,
-      size: file.size,
-      type: file.type
+    const form = new FormData()
+    form.append("file", file)
+    const res = await fetch(`${API_BASE_URL}/uploads/`, {
+      method: "POST",
+      body: form,
+      credentials: 'include'
     })
-
-    const formData = new FormData()
-    formData.append('file', file)
-
-    const response = await fetch(`${API_BASE_URL}/uploads/`, {
-      method: 'POST',
-      body: formData,
-    })
-
-    console.log("📡 Response status:", response.status)
-    console.log("📡 Response headers:", Object.fromEntries(response.headers.entries()))
-
-    const data = await response.json()
-    console.log("📦 Response data:", data)
-    
-    if (!response.ok) {
-      throw new Error(data.detail || 'Upload failed')
-    }
-
-    console.log("✅ Upload successful!")
-    return {
-      success: true,
-      data: data
-    }
-  } catch (error) {
-    console.error('❌ Upload error:', error)
-    return {
-      success: false,
-      error: error instanceof Error ? error.message : 'Upload failed'
-    }
+    const json = await safeJson(res)
+    if (!res.ok) return { success: false, error: json?.detail || res.statusText }
+    return { success: true, data: json }
+  } catch (error: any) {
+    return { success: false, error: error?.message || "Upload failed" }
   }
 }
 
 export const getFilePreview = async (fileId: string, rows: number = 10): Promise<ApiResponse> => {
   try {
-    const response = await fetch(`${API_BASE_URL}/uploads/${fileId}/preview?rows=${rows}`)
-    const data = await response.json()
-
-    if (!response.ok) {
-      throw new Error(data.detail || 'Failed to get preview')
-    }
-
-    return {
-      success: true,
-      data: data
-    }
-  } catch (error) {
-    console.error('Preview error:', error)
-    return {
-      success: false,
-      error: error instanceof Error ? error.message : 'Failed to get preview'
-    }
+    const res = await fetch(`${API_BASE_URL}/uploads/${encodeURIComponent(fileId)}/preview?rows=${rows}`, { credentials: 'include' })
+    const json = await safeJson(res)
+    if (!res.ok) return { success: false, error: json?.detail || res.statusText }
+    return { success: true, data: json }
+  } catch (error: any) {
+    return { success: false, error: error?.message || "Failed to get preview" }
   }
 }
 
 export const listFiles = async (): Promise<ApiResponse> => {
   try {
-    const response = await fetch(`${API_BASE_URL}/uploads/`)
-    const data = await response.json()
-
-    if (!response.ok) {
-      throw new Error(data.detail || 'Failed to list files')
-    }
-
-    return {
-      success: true,
-      data: data
-    }
-  } catch (error) {
-    console.error('List files error:', error)
-    return {
-      success: false,
-      error: error instanceof Error ? error.message : 'Failed to list files'
-    }
+    const res = await fetch(`${API_BASE_URL}/uploads/`, { credentials: 'include' })
+    const json = await safeJson(res)
+    if (!res.ok) return { success: false, error: json?.detail || res.statusText }
+    return { success: true, data: json }
+  } catch (error: any) {
+    return { success: false, error: error?.message || "Failed to list files" }
   }
 }
 
@@ -106,17 +86,9 @@ export const startAnalysis = async (
   }
 ): Promise<ApiResponse> => {
   try {
-    console.log("API: Starting analysis request...")
-    console.log("API: File ID:", fileId)
-    console.log("API: Prompt length:", prompt.length)
-    console.log("API: Prompt preview:", prompt.substring(0, 100) + "...")
-    
-    const response = await fetch(`${API_BASE_URL}/analysis/analyze/${fileId}`, {
+    const response = await fetch(`${API_BASE_URL}/analysis/analyze/${encodeURIComponent(fileId)}`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Accept': 'application/json',
-      },
+      headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
       body: JSON.stringify({
         prompt,
@@ -126,283 +98,165 @@ export const startAnalysis = async (
         echart_sample_code: options?.echartSampleCode,
       }),
     })
-
-    console.log("API: Analysis request response status:", response.status)
-
-    if (!response.ok) {
-      let errorDetail = 'Failed to start analysis'
-      try {
-        const errorData = await response.json()
-        errorDetail = errorData.detail || errorDetail
-      } catch {
-        errorDetail = `HTTP ${response.status}: ${response.statusText}`
-      }
-      throw new Error(errorDetail)
-    }
-
-    const data = await response.json()
-    console.log("API: Analysis started successfully:", data)
-
-    return {
-      success: true,
-      data: data
-    }
-  } catch (error) {
-    console.error('API: Analysis start error:', error)
-    return {
-      success: false,
-      error: error instanceof Error ? error.message : 'Failed to start analysis'
-    }
+    const data = await safeJson(response)
+    if (!response.ok) return { success: false, error: data?.detail || response.statusText }
+    return { success: true, data }
+  } catch (error: any) {
+    return { success: false, error: error?.message || 'Failed to start analysis' }
   }
 }
 
 export const getAnalysisStatus = async (taskId: string): Promise<ApiResponse> => {
   try {
-    console.log("API: Checking status for task:", taskId)
-    
-    const response = await fetch(`${API_BASE_URL}/analysis/status/${taskId}`, {
-      method: 'GET',
-      headers: {
-        'Accept': 'application/json',
-      },
-      credentials: 'include',
-    })
-
-    console.log("API: Status response status:", response.status)
-
-    if (!response.ok) {
-      let errorDetail = 'Failed to get analysis status'
-      try {
-        const errorData = await response.json()
-        errorDetail = errorData.detail || errorDetail
-      } catch {
-        errorDetail = `HTTP ${response.status}: ${response.statusText}`
-      }
-      throw new Error(errorDetail)
-    }
-
-    const data = await response.json()
-    console.log("API: Status data received:", data)
-
-    return {
-      success: true,
-      data: data
-    }
-  } catch (error) {
-    console.error('API: Status check error:', error)
-    return {
-      success: false,
-      error: error instanceof Error ? error.message : 'Failed to get analysis status'
-    }
+    const res = await fetch(`${API_BASE_URL}/analysis/status/${encodeURIComponent(taskId)}`, { credentials: 'include' })
+    const json = await safeJson(res)
+    if (!res.ok) return { success: false, error: json?.detail || res.statusText }
+    return { success: true, data: json }
+  } catch (error: any) {
+    return { success: false, error: error?.message || 'Failed to get analysis status' }
   }
 }
 
 export const getAnalysisResult = async (taskId: string): Promise<ApiResponse> => {
   try {
-    console.log("API: Fetching result for task:", taskId)
-    
-    const response = await fetch(`${API_BASE_URL}/analysis/result/${taskId}`, {
-      method: 'GET',
-      headers: {
-        'Accept': 'application/json',
-      },
-      credentials: 'include',
-    })
-
-    console.log("API: Result response status:", response.status)
-
-    if (!response.ok) {
-      let errorDetail = 'Failed to get analysis result'
-      try {
-        const errorData = await response.json()
-        errorDetail = errorData.detail || errorDetail
-      } catch {
-        errorDetail = `HTTP ${response.status}: ${response.statusText}`
-      }
-      throw new Error(errorDetail)
-    }
-
-    const data = await response.json()
-    console.log("API: Result data received:", data)
-
-    return {
-      success: true,
-      data: data
-    }
-  } catch (error) {
-    console.error('API: Result fetch error:', error)
-    return {
-      success: false,
-      error: error instanceof Error ? error.message : 'Failed to get analysis result'
-    }
+    const res = await fetch(`${API_BASE_URL}/analysis/result/${encodeURIComponent(taskId)}`, { credentials: 'include' })
+    const json = await safeJson(res)
+    if (!res.ok) return { success: false, error: json?.detail || res.statusText }
+    return { success: true, data: json }
+  } catch (error: any) {
+    return { success: false, error: error?.message || 'Failed to get analysis result' }
   }
 }
 
-// Analysis visibility management
 export const toggleAnalysisVisibility = async (analysisId: string, isActive: boolean): Promise<ApiResponse> => {
   try {
-    console.log("API: Toggling visibility for analysis:", analysisId, "to:", isActive)
-    
-    const response = await fetch(`${API_BASE_URL}/analysis/visibility/${analysisId}`, {
+    const res = await fetch(`${API_BASE_URL}/analysis/visibility/${encodeURIComponent(analysisId)}`, {
       method: 'PATCH',
-      headers: {
-        'Content-Type': 'application/json',
-        'Accept': 'application/json',
-      },
+      headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
-      body: JSON.stringify({
-        is_active: isActive  // Changed from is_visible to is_active
-      }),
+      body: JSON.stringify({ is_active: isActive })
     })
-
-    console.log("API: Visibility toggle response status:", response.status)
-
-    if (!response.ok) {
-      let errorDetail = 'Failed to update visibility'
-      try {
-        const errorData = await response.json()
-        errorDetail = errorData.detail || errorDetail
-      } catch {
-        errorDetail = `HTTP ${response.status}: ${response.statusText}`
-      }
-      throw new Error(errorDetail)
-    }
-
-    const data = await response.json()
-    console.log("API: Visibility updated successfully:", data)
-    
-    return {
-      success: true,
-      data: data
-    }
-  } catch (error) {
-    console.error("API: Visibility toggle error:", error)
-    return {
-      success: false,
-      error: error instanceof Error ? error.message : 'Failed to update visibility'
-    }
+    const json = await safeJson(res)
+    if (!res.ok) return { success: false, error: json?.detail || res.statusText }
+    return { success: true, data: json }
+  } catch (error: any) {
+    return { success: false, error: error?.message || 'Failed to update visibility' }
   }
 }
 
 export const getVisibleAnalyses = async (analysisType?: string): Promise<ApiResponse> => {
   try {
-    const url = analysisType 
-      ? `${API_BASE_URL}/analysis/active?analysis_type=${analysisType}`
+    const url = analysisType
+      ? `${API_BASE_URL}/analysis/active?analysis_type=${encodeURIComponent(analysisType)}`
       : `${API_BASE_URL}/analysis/active`
-      
-    const response = await fetch(url, {
-      method: 'GET',
-      headers: {
-        'Accept': 'application/json',
-      },
-      credentials: 'include',
-    })
-
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}: ${response.statusText}`)
-    }
-
-    const data = await response.json()
-    return {
-      success: true,
-      data: data
-    }
-  } catch (error) {
-    return {
-      success: false,
-      error: error instanceof Error ? error.message : 'Failed to fetch active analyses'
-    }
+    const res = await fetch(url, { credentials: 'include' })
+    const json = await safeJson(res)
+    if (!res.ok) return { success: false, error: json?.detail || res.statusText }
+    return { success: true, data: json }
+  } catch (error: any) {
+    return { success: false, error: error?.message || 'Failed to fetch active analyses' }
   }
 }
 
-// Enhanced getAnalysisHistory with visibility filter
-export const getAnalysisHistory = async (): Promise<ApiResponse<any[]>> => {
+export const getAnalysisHistory = async (): Promise<ApiResponse> => {
   try {
-    const response = await fetch(`${API_BASE_URL}/analysis/history`, {
-      method: 'GET',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-    });
-
-    const data = await response.json();
-
-    if (response.ok) {
-      return {
-        success: true,
-        data: data.data || [],
-      };
-    } else {
-      return {
-        success: false,
-        error: data.detail || 'Failed to fetch analysis history',
-      };
-    }
-  } catch (error) {
-    console.error('Error fetching analysis history:', error);
-    return {
-      success: false,
-      error: error instanceof Error ? error.message : 'Network error',
-    };
+    const res = await fetch(`${API_BASE_URL}/analysis/history`, { credentials: 'include' })
+    const json = await safeJson(res)
+    if (!res.ok) return { success: false, error: json?.detail || res.statusText }
+    return { success: true, data: json?.data || json }
+  } catch (error: any) {
+    return { success: false, error: error?.message || 'Failed to fetch analysis history' }
   }
-};
+}
 
-export const getAnalysisResultFromDB = async (analysisId: string): Promise<ApiResponse<any>> => {
+// Templates, graph types, dashboard helpers (kept — adapt if you need)
+// Note: keep or re-implement additional helpers (templates, graph-templates, dashboard analysis) as needed in same style.
+
+export const getAvailableSheets = async (fileId: string): Promise<ApiResponse> => {
   try {
-    const response = await fetch(`${API_BASE_URL}/analysis/result/db/${analysisId}`, {
-      method: 'GET',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-    });
-
-    const data = await response.json();
-
-    if (response.ok) {
-      return {
-        success: true,
-        data: data,
-      };
-    } else {
-      return {
-        success: false,
-        error: data.detail || 'Failed to fetch analysis result',
-      };
-    }
-  } catch (error) {
-    console.error('Error fetching analysis result:', error);
-    return {
-      success: false,
-      error: error instanceof Error ? error.message : 'Network error',
-    };
+    const res = await fetch(`${API_BASE_URL}/uploads/${encodeURIComponent(fileId)}/sheets`, { credentials: 'include' })
+    const json = await safeJson(res)
+    if (!res.ok) return { success: false, error: json?.detail || res.statusText }
+    return { success: true, data: json?.data || json }
+  } catch (error: any) {
+    return { success: false, error: error?.message || 'Failed to get sheets' }
   }
-};
+}
 
-// Template APIs
+export const getGraphTemplates = async (): Promise<ApiResponse> => {
+  try {
+    const res = await fetch(`${API_BASE_URL}/graph-templates/?page=1&page_size=50&is_active=true`, { credentials: 'include' })
+    const json = await safeJson(res)
+    if (!res.ok) return { success: false, error: json?.detail || res.statusText }
+    return { success: true, data: json }
+  } catch (error: any) {
+    return { success: false, error: error?.message || 'Failed to get graph templates' }
+  }
+}
+
+export const getAvailableGraphTypes = async (): Promise<ApiResponse> => {
+  try {
+    const resp = await getGraphTemplates()
+    if (!resp.success) return { success: false, error: resp.error || 'Failed to get graph templates' }
+    const templates = resp.data?.graph_templates || resp.data?.graph_templates || []
+    const graphTypes = templates.map((t: any) => ({
+      value: t.graph_type,
+      name: t.graph_name,
+      description: t.description,
+      echart_code: t.echart_code,
+      category: t.category
+    }))
+    return { success: true, data: { graph_types: graphTypes, total_types: graphTypes.length } }
+  } catch (error: any) {
+    return { success: false, error: error?.message || 'Failed to get graph types' }
+  }
+}
+
+// Dashboard APIs
+export const startDashboardAnalysis = async (fileId: string): Promise<ApiResponse> => {
+  try {
+    const res = await fetch(`${API_BASE_URL}/analysis/analyze/${encodeURIComponent(fileId)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({
+        prompt: "Perform comprehensive dashboard analysis covering executive overview, HR analytics, team management, and skill analysis",
+        model: 'claude-3-7-sonnet-20250219',
+        analysis_type: 'dashboard'
+      })
+    })
+    const json = await safeJson(res)
+    if (!res.ok) return { success: false, error: json?.detail || res.statusText }
+    return { success: true, data: json }
+  } catch (error: any) {
+    return { success: false, error: error?.message || 'Failed to start dashboard analysis' }
+  }
+}
+
+export const getDashboardResult = async (taskId: string): Promise<ApiResponse> => {
+  try {
+    const res = await fetch(`${API_BASE_URL}/analysis/dashboard/${encodeURIComponent(taskId)}`, { credentials: 'include' })
+    const json = await safeJson(res)
+    if (!res.ok) return { success: false, error: json?.detail || res.statusText }
+    return { success: true, data: json }
+  } catch (error: any) {
+    return { success: false, error: error?.message || 'Failed to get dashboard result' }
+  }
+}
+
 export const getTemplates = async (includeDefaults: boolean = true, category?: string): Promise<ApiResponse> => {
   try {
-    const params = new URLSearchParams({
-      include_defaults: includeDefaults.toString()
-    })
-    if (category) params.append('category', category)
+    const params = new URLSearchParams()
+    params.append("include_defaults", includeDefaults ? "true" : "false")
+    if (category) params.append("category", category)
 
-    const response = await fetch(`${API_BASE_URL}/templates/?${params}`)
-    const data = await response.json()
-
-    if (!response.ok) {
-      throw new Error(data.detail || 'Failed to get templates')
-    }
-
-    return {
-      success: true,
-      data: data
-    }
-  } catch (error) {
-    console.error('Get templates error:', error)
-    return {
-      success: false,
-      error: error instanceof Error ? error.message : 'Failed to get templates'
-    }
+    const res = await fetch(`${API_BASE_URL}/templates/?${params.toString()}`, { credentials: 'include' })
+    const json = await safeJson(res)
+    if (!res.ok) return { success: false, error: json?.detail || res.statusText }
+    // API returns list — normalize
+    return { success: true, data: json }
+  } catch (error: any) {
+    return { success: false, error: error?.message || 'Failed to get templates' }
   }
 }
 
@@ -415,30 +269,24 @@ export const createTemplate = async (templateData: {
   color_scheme?: string
 }): Promise<ApiResponse> => {
   try {
-    const response = await fetch(`${API_BASE_URL}/templates/`, {
+    const res = await fetch(`${API_BASE_URL}/templates/`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(templateData),
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({
+        title: templateData.title,
+        description: templateData.description,
+        prompt: templateData.prompt,
+        category: templateData.category,
+        icon: templateData.icon,
+        color_scheme: templateData.color_scheme
+      })
     })
-
-    const data = await response.json()
-
-    if (!response.ok) {
-      throw new Error(data.detail || 'Failed to create template')
-    }
-
-    return {
-      success: true,
-      data: data
-    }
-  } catch (error) {
-    console.error('Create template error:', error)
-    return {
-      success: false,
-      error: error instanceof Error ? error.message : 'Failed to create template'
-    }
+    const json = await safeJson(res)
+    if (!res.ok) return { success: false, error: json?.detail || res.statusText }
+    return { success: true, data: json }
+  } catch (error: any) {
+    return { success: false, error: error?.message || 'Failed to create template' }
   }
 }
 
@@ -452,308 +300,55 @@ export const updateTemplate = async (templateId: number, templateData: {
   is_active?: boolean
 }): Promise<ApiResponse> => {
   try {
-    const response = await fetch(`${API_BASE_URL}/templates/${templateId}`, {
+    const res = await fetch(`${API_BASE_URL}/templates/${encodeURIComponent(templateId)}`, {
       method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(templateData),
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify(templateData)
     })
-
-    const data = await response.json()
-
-    if (!response.ok) {
-      throw new Error(data.detail || 'Failed to update template')
-    }
-
-    return {
-      success: true,
-      data: data
-    }
-  } catch (error) {
-    console.error('Update template error:', error)
-    return {
-      success: false,
-      error: error instanceof Error ? error.message : 'Failed to update template'
-    }
+    const json = await safeJson(res)
+    if (!res.ok) return { success: false, error: json?.detail || res.statusText }
+    return { success: true, data: json }
+  } catch (error: any) {
+    return { success: false, error: error?.message || 'Failed to update template' }
   }
 }
 
 export const deleteTemplate = async (templateId: number): Promise<ApiResponse> => {
   try {
-    const response = await fetch(`${API_BASE_URL}/templates/${templateId}`, {
+    const res = await fetch(`${API_BASE_URL}/templates/${encodeURIComponent(templateId)}`, {
       method: 'DELETE',
+      credentials: 'include'
     })
-
-    if (!response.ok) {
-      const data = await response.json()
-      throw new Error(data.detail || 'Failed to delete template')
+    if (!res.ok) {
+      const json = await safeJson(res)
+      return { success: false, error: json?.detail || res.statusText }
     }
-
-    return {
-      success: true,
-      data: { message: 'Template deleted successfully' }
-    }
-  } catch (error) {
-    console.error('Delete template error:', error)
-    return {
-      success: false,
-      error: error instanceof Error ? error.message : 'Failed to delete template'
-    }
+    return { success: true, data: { message: 'Template deleted successfully' } }
+  } catch (error: any) {
+    return { success: false, error: error?.message || 'Failed to delete template' }
   }
 }
 
-export const bulkAnalyzeWithTemplates = async (fileId: string, templateIds: number[]): Promise<ApiResponse> => {
-  try {
-    const response = await fetch(`${API_BASE_URL}/templates/bulk-analyze`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        file_id: fileId,
-        template_ids: templateIds,
-        enable_code_review: true,
-      }),
-    })
-
-    const data = await response.json()
-
-    if (!response.ok) {
-      throw new Error(data.detail || 'Failed to start bulk analysis')
-    }
-
-    return {
-      success: true,
-      data: data
-    }
-  } catch (error) {
-    console.error('Bulk analysis error:', error)
-    return {
-      success: false,
-      error: error instanceof Error ? error.message : 'Failed to start bulk analysis'
-    }
-  }
-}
-
-export const getTemplateCategories = async (): Promise<ApiResponse> => {
-  try {
-    const response = await fetch(`${API_BASE_URL}/templates/categories`)
-    const data = await response.json()
-
-    if (!response.ok) {
-      throw new Error(data.detail || 'Failed to get categories')
-    }
-
-    return {
-      success: true,
-      data: data
-    }
-  } catch (error) {
-    console.error('Get categories error:', error)
-    return {
-      success: false,
-      error: error instanceof Error ? error.message : 'Failed to get categories'
-    }
-  }
-}
-
-// Sheet and Graph Type APIs - UPDATED
-export const getAvailableSheets = async (fileId: string): Promise<ApiResponse> => {
-  try {
-    console.log("API: Getting sheets for file:", fileId)
-    
-    const response = await fetch(`${API_BASE_URL}/uploads/${fileId}/sheets`, {
-      method: 'GET',
-      headers: {
-        'Accept': 'application/json',
-      },
-      credentials: 'include',
-    })
-
-    console.log("API: Sheets response status:", response.status)
-
-    if (!response.ok) {
-      let errorDetail = 'Failed to get available sheets'
-      try {
-        const errorData = await response.json()
-        errorDetail = errorData.detail || errorDetail
-      } catch {
-        errorDetail = `HTTP ${response.status}: ${response.statusText}`
-      }
-      throw new Error(errorDetail)
-    }
-
-    const data = await response.json()
-    console.log("API: Sheets data received:", data)
-
-    return {
-      success: true,
-      data: data
-    }
-  } catch (error) {
-    console.error('API: Get sheets error:', error)
-    return {
-      success: false,
-      error: error instanceof Error ? error.message : 'Failed to get sheets'
-    }
-  }
-}
-
-// Graph Templates API - NEW
-export const getGraphTemplates = async (): Promise<ApiResponse> => {
-  try {
-    console.log("API: Getting graph templates")
-    
-    const response = await fetch(`${API_BASE_URL}/graph-templates/?page=1&page_size=50&is_active=true`, {
-      method: 'GET',
-      headers: {
-        'Accept': 'application/json',
-      },
-      credentials: 'include',
-    })
-
-    console.log("API: Graph templates response status:", response.status)
-
-    if (!response.ok) {
-      let errorDetail = 'Failed to get graph templates'
-      try {
-        const errorData = await response.json()
-        errorDetail = errorData.detail || errorDetail
-      } catch {
-        errorDetail = `HTTP ${response.status}: ${response.statusText}`
-      }
-      throw new Error(errorDetail)
-    }
-
-    const data = await response.json()
-    console.log("API: Graph templates data received:", data)
-
-    return {
-      success: true,
-      data: data
-    }
-  } catch (error) {
-    console.error('API: Get graph templates error:', error)
-    return {
-      success: false,
-      error: error instanceof Error ? error.message : 'Failed to get graph templates'
-    }
-  }
-}
-
-export const getAvailableGraphTypes = async (): Promise<ApiResponse> => {
-  try {
-    console.log("API: Getting available graph types")
-    
-    // Use the new graph templates endpoint instead
-    const response = await getGraphTemplates()
-    
-    if (response.success && response.data?.graph_templates) {
-      // Transform templates to the expected format
-      const graphTypes = response.data.graph_templates.map((template: any) => ({
-        value: template.graph_type,
-        name: template.graph_name,
-        description: template.description,
-        echart_code: template.echart_code,
-        category: template.category
-      }))
-      
-      return {
-        success: true,
-        data: {
-          graph_types: graphTypes,
-          total_types: graphTypes.length
-        }
-      }
-    } else {
-      throw new Error(response.error || 'Failed to fetch graph templates')
-    }
-  } catch (error) {
-    console.error('API: Get graph types error:', error)
-    return {
-      success: false,
-      error: error instanceof Error ? error.message : 'Failed to get graph types'
-    }
-  }
-}
-
-// New metadata APIs
-export const getAnalysisTypes = async (): Promise<ApiResponse> => {
-  try {
-    const response = await fetch(`${API_BASE_URL}/metadata/analysis-types`, {
-      method: 'GET',
-      headers: {
-        'Accept': 'application/json',
-      },
-      credentials: 'include',
-    })
-
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}: ${response.statusText}`)
-    }
-
-    const data = await response.json()
-    return {
-      success: true,
-      data: data
-    }
-  } catch (error) {
-    return {
-      success: false,
-      error: error instanceof Error ? error.message : 'Failed to get analysis types'
-    }
-  }
-}
-
-export const getAvailableModels = async (): Promise<ApiResponse> => {
-  try {
-    const response = await fetch(`${API_BASE_URL}/metadata/models`, {
-      method: 'GET',
-      headers: {
-        'Accept': 'application/json',
-      },
-      credentials: 'include',
-    })
-
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}: ${response.statusText}`)
-    }
-
-    const data = await response.json()
-    return {
-      success: true,
-      data: data
-    }
-  } catch (error) {
-    return {
-      success: false,
-      error: error instanceof Error ? error.message : 'Failed to get models'
-    }
-  }
-}
-
-// Enhanced analysis API with new parameters
 export const startAdvancedAnalysis = async (
   fileId: string,
   prompt: string,
   options: {
     sheet?: string
     graphType?: string
-    analysisType?: 'skill' | 'gap'
+    analysisType?: 'skill' | 'gap' | 'dashboard'
     echartSampleCode?: string
     model?: string
   }
 ): Promise<ApiResponse> => {
   try {
     console.log("API: Starting advanced analysis request...")
+    console.log("API: File ID:", fileId)
+    console.log("API: Options:", options)
     
-    const response = await fetch(`${API_BASE_URL}/analysis/analyze/${fileId}`, {
+    const response = await fetch(`${API_BASE_URL}/analysis/analyze/${encodeURIComponent(fileId)}`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Accept': 'application/json',
-      },
+      headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
       body: JSON.stringify({
         prompt,
@@ -761,31 +356,13 @@ export const startAdvancedAnalysis = async (
         graph_type: options?.graphType,
         sheet: options?.sheet,
         echart_sample_code: options?.echartSampleCode,
-        analysis_type: options?.analysisType,
+        analysis_type: options?.analysisType || 'dashboard',
       }),
     })
-
-    if (!response.ok) {
-      let errorDetail = 'Failed to start analysis'
-      try {
-        const errorData = await response.json()
-        errorDetail = errorData.detail || errorDetail
-      } catch {
-        errorDetail = `HTTP ${response.status}: ${response.statusText}`
-      }
-      throw new Error(errorDetail)
-    }
-
-    const data = await response.json()
-    return {
-      success: true,
-      data: data
-    }
-  } catch (error) {
-    console.error('API: Advanced analysis error:', error)
-    return {
-      success: false,
-      error: error instanceof Error ? error.message : 'Failed to start analysis'
-    }
+    const data = await safeJson(response)
+    if (!response.ok) return { success: false, error: data?.detail || response.statusText }
+    return { success: true, data }
+  } catch (error: any) {
+    return { success: false, error: error?.message || 'Failed to start advanced analysis' }
   }
 }

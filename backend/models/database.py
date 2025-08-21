@@ -54,12 +54,11 @@ class AnalysisResult(Base):
     analysis_id = Column(String(255), unique=True, index=True, nullable=False)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     file_id = Column(Integer, ForeignKey("uploaded_files.id"), nullable=False)
+
     
-    # Essential fields only
-    query = Column(Text, nullable=False)
-    echart_code = Column(Text, nullable=True)
-    designed_echart_code = Column(Text, nullable=True)
-    response_df = Column(JSON, nullable=True)  # Store as JSON
+    # Add dashboard results storage
+    dashboard_results = Column(JSON, nullable=True)  # Store full dashboard analysis
+    analysis_type = Column(String, default="dashboard", nullable=True)  # Type of analysis performed
     
     # Metadata
     created_at = Column(DateTime, default=datetime.utcnow)

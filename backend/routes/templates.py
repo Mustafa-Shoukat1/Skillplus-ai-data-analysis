@@ -12,7 +12,7 @@ from models.templates import (
     AITemplateCreate, AITemplateUpdate, AITemplateResponse, 
     TemplateUsageStats, BulkAnalysisRequest, BulkAnalysisResponse
 )
-from models.data_analysis import DataAnalysisRequest
+
 from core.database import get_async_db_dependency
 from core.logger import logger
 
@@ -301,11 +301,7 @@ async def bulk_analyze_with_templates(
         # Start analysis for each template
         for template in valid_templates:
             # Create analysis request
-            analysis_request = DataAnalysisRequest(
-                prompt=template.prompt,
-                model=request.model,
-                enable_code_review=request.enable_code_review
-            )
+           
             
             # Generate task ID
             task_id = str(uuid.uuid4())
@@ -327,7 +323,6 @@ async def bulk_analyze_with_templates(
                 DataAnalysisService.run_background_analysis,
                 request.file_id,
                 default_user_id,
-                analysis_request,
                 analysis_results,
                 task_id
             )
