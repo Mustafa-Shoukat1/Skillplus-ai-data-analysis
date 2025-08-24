@@ -27,8 +27,8 @@ from models.data_analysis import (
 )
 from dotenv import load_dotenv
 load_dotenv()
-from langchain_anthropic import ChatAnthropic
-llm=ChatAnthropic(model_name='claude-3-7-sonnet-20250219', temperature=0.5, max_tokens=10000)
+from langchain_google_genai.chat_models import ChatGoogleGenerativeAI
+llm=ChatGoogleGenerativeAI(model='gemini-1.5-flash-002', temperature=0.5, max_tokens=8000)
 from pydantic import BaseModel, Field
 
 # Configure logging
