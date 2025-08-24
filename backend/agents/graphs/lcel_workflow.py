@@ -96,6 +96,26 @@ def _ensure_exec_defaults(d: Dict[str, Any]) -> Dict[str, Any]:
     d.setdefault("competency_strength_areas", [])
     d.setdefault("risk_indicators", {})
     d.setdefault("roi_metrics", {"training_effectiveness":0,"performance_improvement":0,"talent_retention":0})
+    
+    # Sanitize trend_analysis to ensure it's a valid enum value
+    valid_trends = ["improving", "declining", "stable", "volatile"]
+    if d.get("trend_analysis") not in valid_trends:
+        d["trend_analysis"] = "stable"
+    
+    # Sanitize roi_metrics to ensure all values are numeric
+    roi_metrics = d.get("roi_metrics", {})
+    if isinstance(roi_metrics, dict):
+        sanitized_roi = {}
+        for key in ["training_effectiveness", "performance_improvement", "talent_retention"]:
+            value = roi_metrics.get(key, 0)
+            try:
+                sanitized_roi[key] = float(value) if isinstance(value, (int, float, str)) and str(value).replace('.', '').replace('-', '').isdigit() else 0.0
+            except (ValueError, TypeError):
+                sanitized_roi[key] = 0.0
+        d["roi_metrics"] = sanitized_roi
+    else:
+        d["roi_metrics"] = {"training_effectiveness": 0.0, "performance_improvement": 0.0, "talent_retention": 0.0}
+    
     return d
 
 def _ensure_hr_defaults(d: Dict[str, Any]) -> Dict[str, Any]:
@@ -110,6 +130,36 @@ def _ensure_hr_defaults(d: Dict[str, Any]) -> Dict[str, Any]:
     d.setdefault("compensation_benchmarks", {})
     d.setdefault("engagement_indicators", {})
     d.setdefault("turnover_predictions", {})
+    d.setdefault("skill_gap_analysis", [])
+    
+    # Sanitize compensation_benchmarks to ensure all values are numeric
+    compensation_benchmarks = d.get("compensation_benchmarks", {})
+    if isinstance(compensation_benchmarks, dict):
+        sanitized_compensation = {}
+        for key in ["performance_pay_alignment", "merit_increase_recommendations"]:
+            value = compensation_benchmarks.get(key, 0.0)
+            try:
+                sanitized_compensation[key] = float(value) if value is not None and isinstance(value, (int, float, str)) and str(value).replace('.', '').replace('-', '').isdigit() else 0.0
+            except (ValueError, TypeError):
+                sanitized_compensation[key] = 0.0
+        d["compensation_benchmarks"] = sanitized_compensation
+    else:
+        d["compensation_benchmarks"] = {"performance_pay_alignment": 0.0, "merit_increase_recommendations": 0.0}
+    
+    # Sanitize engagement_indicators to ensure all values are numeric
+    engagement_indicators = d.get("engagement_indicators", {})
+    if isinstance(engagement_indicators, dict):
+        sanitized_engagement = {}
+        for key in ["satisfaction_proxy", "development_participation"]:
+            value = engagement_indicators.get(key, 0.0)
+            try:
+                sanitized_engagement[key] = float(value) if value is not None and isinstance(value, (int, float, str)) and str(value).replace('.', '').replace('-', '').isdigit() else 0.0
+            except (ValueError, TypeError):
+                sanitized_engagement[key] = 0.0
+        d["engagement_indicators"] = sanitized_engagement
+    else:
+        d["engagement_indicators"] = {"satisfaction_proxy": 0.0, "development_participation": 0.0}
+    
     return d
 
 def _ensure_team_defaults(d: Dict[str, Any]) -> Dict[str, Any]:
