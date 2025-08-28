@@ -191,3 +191,4 @@ db_test.py
 migrate_database.py
 run_migration.bat
 uploads/
+.DS_Store

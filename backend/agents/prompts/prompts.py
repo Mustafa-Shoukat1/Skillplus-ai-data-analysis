@@ -46,6 +46,12 @@ Talent Metrics: {talent_metrics}
 PERFORMANCE DISTRIBUTION:
 {performance_distributions}
 
+SKILL GAP ANALYSIS:
+{skill_gap_analysis}
+
+TOP AND BOTTOM PERFORMERS:
+{top_bottom_performers}
+
 IMPORTANT: Provide comprehensive HR analytics in JSON format:
 {{
     "workforce_analytics": {{"total_assessed": <number>, "departments": <number>, "avg_tenure_estimate": <number>, "performance_spread": <number>}},
@@ -58,10 +64,12 @@ IMPORTANT: Provide comprehensive HR analytics in JSON format:
     "succession_planning": {{"leadership_ready": <number>, "emerging_leaders": <number>, "development_pipeline": <number>}},
     "compensation_benchmarks": {{"performance_pay_alignment": <number>, "merit_increase_recommendations": <number>}},
     "engagement_indicators": {{"satisfaction_proxy": <number>, "development_participation": <number>}},
-    "turnover_predictions": {{"voluntary_risk": <number>, "skill_flight_risk": <number>, "retention_strategies_needed": <number>}}
+    "turnover_predictions": {{"voluntary_risk": <number>, "skill_flight_risk": <number>, "retention_strategies_needed": <number>}},
+    "skill_gap_analysis": [Use the provided skill gap analysis data to populate this field with detailed competency gaps by department],
+    "top_5_bottom_5": [Use the provided top_bottom_performers data to populate this field with the exact structure provided]
 }}
 
-Focus on talent optimization and workforce development strategies.
+Focus on talent optimization and workforce development strategies. Use the skill gap analysis to identify critical training needs and departmental development priorities. Include the top 5 and bottom 5 performers data exactly as provided in the top_bottom_performers field.
 """)
 
 TEAM_PROMPT = ChatPromptTemplate.from_template("""

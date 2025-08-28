@@ -1,5 +1,5 @@
 import asyncio
-from typing import Dict, Any
+from typing import Dict, Any, List
 import pandas as pd
 import numpy as np
 import json
@@ -131,7 +131,7 @@ def _ensure_hr_defaults(d: Dict[str, Any]) -> Dict[str, Any]:
     d.setdefault("engagement_indicators", {})
     d.setdefault("turnover_predictions", {})
     d.setdefault("skill_gap_analysis", [])
-    
+    d.setdefault("top_5_bottom_5", {"top_5": [], "bottom_5": []})
     # Sanitize compensation_benchmarks to ensure all values are numeric
     compensation_benchmarks = d.get("compensation_benchmarks", {})
     if isinstance(compensation_benchmarks, dict):
@@ -220,6 +220,181 @@ def build_legacy_executive_inputs(stats: Dict[str, Any], benchmarks: Dict[str, A
         "performance_summary": performance_summary,
         "key_metrics": key_metrics
     }
+
+# =============================================================================
+# SKILLS GAP ANALYSIS UTILITIES
+# =============================================================================
+
+def preprocess_department(df, department_name):
+    """
+    Convert wide-format department dataframe into long-format
+    with columns: Department, Employee ID, Name, Family Name, Competency, Score
+    """
+    df_clean = df.copy()
+
+    competency_score_pairs = []
+    for i, col in enumerate(df_clean.columns):
+        if any('\u0600' <= ch <= '\u06FF' for ch in col):  # Arabic competency
+            if i + 1 < len(df_clean.columns) and "% Score per Competency" in df_clean.columns[i + 1]:
+                competency_score_pairs.append((col, df_clean.columns[i + 1]))
+
+    long_df_list = []
+    for comp_col, score_col in competency_score_pairs:
+        temp = df_clean[["Employee ID", "Name", "Family Name"]].copy()
+        temp["Competency"] = comp_col
+        temp["Score"] = pd.to_numeric(df_clean[score_col], errors="coerce")
+        long_df_list.append(temp)
+
+    long_df = pd.concat(long_df_list, ignore_index=True)
+    long_df["Department"] = department_name
+
+    return long_df
+
+def combine_all_departments(processed_data: Dict[str, pd.DataFrame]):
+    """
+    Combine all department dataframes using the department mapping
+    """
+    department_mapping = {
+        "Back Office": ["back_office", "backoffice", "back office"],
+        "Call Center": ["call_center", "callcenter", "call center"],
+        "Leaders": ["leaders", "leader", "leadership"],
+        "Retail": ["retail", "sales"]
+    }
+    
+    combined_dfs = []
+    
+    for standard_name, variations in department_mapping.items():
+        for sheet_name, df in processed_data.items():
+            if any(var.lower() in sheet_name.lower() for var in variations):
+                try:
+                    long_df = preprocess_department(df, standard_name)
+                    combined_dfs.append(long_df)
+                    break
+                except Exception as e:
+                    logger.warning(f"Could not process {sheet_name} for {standard_name}: {e}")
+    
+    if combined_dfs:
+        return pd.concat(combined_dfs, ignore_index=True)
+    else:
+        return pd.DataFrame()
+
+def create_skills_gap(all_data, top_n=10):
+    """
+    Create pivot table for skills gap analysis
+    Only keep top_n competencies with the largest performance gap
+    """
+    if all_data.empty:
+        return pd.DataFrame()
+    
+    analysis_df = all_data.groupby(["Competency", "Department"])["Score"].mean().reset_index()
+    analysis_df = analysis_df.pivot(index="Competency", columns="Department", values="Score")
+
+    # Add Gap metric
+    analysis_df["Gap"] = analysis_df.max(axis=1) - analysis_df.min(axis=1)
+
+    # Keep top N rows by gap
+    analysis_df = analysis_df.sort_values("Gap", ascending=False).head(top_n)
+
+    return analysis_df.drop(columns=["Gap"])
+
+def generate_insights_json(analysis_df):
+    """
+    Generate detailed insights in JSON format
+    """
+    insights = []
+    for comp in analysis_df.index:
+        row = analysis_df.loc[comp].dropna()
+        if not row.empty:
+            best_dept = row.idxmax()
+            worst_dept = row.idxmin()
+            best_val = row.max()
+            worst_val = row.min()
+            gap = best_val - worst_val
+            insights.append({
+                "competency": comp,
+                "best_department": best_dept,
+                "best_score": round(float(best_val), 1),
+                "worst_department": worst_dept,
+                "worst_score": round(float(worst_val), 1),
+                "gap": round(float(gap), 1),
+                "severity": "critical" if gap > 20 else "high" if gap > 15 else "medium" if gap > 10 else "low"
+            })
+    return insights
+
+
+def get_top_bottom_competencies(all_data, n=5):
+    """
+    Get top N and bottom N competencies based on overall average scores
+    """
+    # Calculate overall average score for each competency across all departments
+    competency_avg = all_data.groupby("Competency")["Score"].mean().sort_values(ascending=False)
+
+    # Get top N and bottom N competencies
+    top_competencies = competency_avg.head(n)
+    bottom_competencies = competency_avg.tail(n)
+
+    return top_competencies, bottom_competencies
+
+
+def get_top_bottom_insights(all_data, n=5):
+    """
+    Generate insights for top and bottom performing competencies
+    """
+    top_comp, bottom_comp = get_top_bottom_competencies(all_data, n)
+
+    insights = {
+        "top_competencies": [],
+        "bottom_competencies": []
+    }
+
+    # Top competencies insights
+    for comp, score in top_comp.items():
+        # Get department-wise breakdown for this competency
+        dept_scores = all_data[all_data["Competency"] == comp].groupby("Department")["Score"].mean()
+
+        insights["top_competencies"].append({
+            "competency": comp,
+            "overall_average": round(float(score), 1),
+            "department_scores": {dept: round(float(score), 1) for dept, score in dept_scores.items()}
+        })
+
+    # Bottom competencies insights
+    for comp, score in bottom_comp.items():
+        # Get department-wise breakdown for this competency
+        dept_scores = all_data[all_data["Competency"] == comp].groupby("Department")["Score"].mean()
+
+        insights["bottom_competencies"].append({
+            "competency": comp,
+            "overall_average": round(float(score), 1),
+            "department_scores": {dept: round(float(score), 1) for dept, score in dept_scores.items()}
+        })
+
+    return insights
+
+
+def run_skills_gap_analysis(processed_data: Dict[str, pd.DataFrame], top_n=10):
+    """
+    Run complete skills gap analysis on processed data
+    """
+    try:
+        # Step 1: preprocess & combine
+        all_data = combine_all_departments(processed_data)
+        
+        if all_data.empty:
+            return [], []
+
+        # Step 2: pivot into skills gap
+        analysis_df = create_skills_gap(all_data, top_n=top_n)
+
+        # Step 3: generate JSON insights
+        insights_json = generate_insights_json(analysis_df)
+        top_bottom_insights = get_top_bottom_insights(all_data, n=top_n-5)
+
+        return top_bottom_insights, insights_json
+
+    except Exception as e:
+        logger.error(f"Skills gap analysis failed: {e}")
+        return pd.DataFrame(), []
 
 # =============================================================================
 # DATA PROCESSING UTILITIES
@@ -450,6 +625,18 @@ class DataProcessor:
             logger.error(f"Error analyzing correlations: {e}")
             return {"status": "error", "message": str(e)}
 
+    @staticmethod
+    def analyze_skill_gaps(processed_data: Dict[str, pd.DataFrame]) -> List[Dict[str, Any]]:
+        """
+        Analyze skill gaps across departments using the skills gap analysis
+        """
+        try:
+            top_5_bottom_5, insights_json = run_skills_gap_analysis(processed_data, top_n=15)
+            return top_5_bottom_5, insights_json
+        except Exception as e:
+            logger.error(f"Error in skill gap analysis: {e}")
+            return []
+
 # Enhanced workflow nodes
 async def enhanced_data_processing_node(state: DashboardState) -> DashboardState:
     """Enhanced data processing with comprehensive analytics"""
@@ -536,6 +723,9 @@ async def enhanced_hr_analysis_node(state: DashboardState) -> DashboardState:
         competencies = state.get("competency_analytics", {})
         benchmarks = state.get("department_benchmarks", {})
 
+        # Generate skill gap analysis
+        top_5_bottom_5, skill_gap_analysis = DataProcessor.analyze_skill_gaps(state["processed_data"])
+
         employee_demographics = {
             "total_employees": stats.get("overall_metrics", {}).get("total_employees", 0),
             "departments": list(state["processed_data"].keys()),
@@ -555,7 +745,8 @@ async def enhanced_hr_analysis_node(state: DashboardState) -> DashboardState:
         }
         talent_metrics = {
             "performance_variance": stats.get("overall_metrics", {}).get("coefficient_of_variation", 0),
-            "consistency_scores": consistency_scores
+            "consistency_scores": consistency_scores,
+            "skill_gaps_identified": len(skill_gap_analysis)
         }
 
         # Legacy keys (in case old prompt still loaded)
@@ -576,6 +767,8 @@ async def enhanced_hr_analysis_node(state: DashboardState) -> DashboardState:
             "department_analysis": json.dumps(department_analysis, indent=2),
             "talent_metrics": json.dumps(talent_metrics, indent=2),
             "performance_distributions": f"High:{performance_segmentation['high_performers']} Core:{performance_segmentation['core_performers']} Developing:{performance_segmentation['developing_performers']}",
+            "skill_gap_analysis": json.dumps(skill_gap_analysis, indent=2),
+            "top_bottom_performers": json.dumps(top_5_bottom_5, indent=2),
             **legacy_hr
         }
 
@@ -584,7 +777,7 @@ async def enhanced_hr_analysis_node(state: DashboardState) -> DashboardState:
             llm,
             hr_inputs,
             HRInsight,
-            _ensure_hr_defaults
+            lambda d: _ensure_hr_defaults({**d, "skill_gap_analysis": skill_gap_analysis})
         )
         state["hr_insights"] = result
         state["current_analysis"] = "hr_completed"

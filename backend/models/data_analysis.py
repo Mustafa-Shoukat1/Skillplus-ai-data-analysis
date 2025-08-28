@@ -52,7 +52,8 @@ class HRInsight(BaseModel):
     compensation_benchmarks: Dict[str, float] = Field(description="Performance vs compensation analysis")
     engagement_indicators: Dict[str, float] = Field(description="Employee engagement metrics")
     turnover_predictions: Dict[str, Any] = Field(description="Turnover risk predictions")
-    skill_gap_analysis:List[Dict[str, Any]] = Field(description="Detailed skill gap analysis by department")
+    skill_gap_analysis: List[Dict[str, Any]] = Field(description="Comprehensive skill analysis including gaps, top and bottom competencies by department")
+    top_5_bottom_5: Dict[str, Any] = Field(description="Top 5 and Bottom 5 performers across key metrics")
 class TeamInsight(BaseModel):
     """Team management insights"""
     team_performance_ranking: List[Dict[str, Any]] = Field(description="Teams ranked by performance")
