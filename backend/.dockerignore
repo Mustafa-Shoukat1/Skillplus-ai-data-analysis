@@ -1,0 +1,39 @@
+# Backend Docker ignore file
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+.env
+.env.local
+*.egg-info/
+dist/
+build/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Logs (keep for container but not in image)
+logs/*.log
+
+# Database (should be mounted as volume)
+database/*.sqlite
+database/*.db
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Git
+.git/
+.gitignore
