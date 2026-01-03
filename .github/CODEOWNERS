@@ -1,0 +1,19 @@
+# Code Owners
+
+# Default owners for everything in the repository
+* @Mustafa-Shoukat1
+
+# Backend owners
+/backend/ @Mustafa-Shoukat1
+
+# Frontend owners  
+/frontend/ @Mustafa-Shoukat1
+
+# Documentation
+*.md @Mustafa-Shoukat1
+/docs/ @Mustafa-Shoukat1
+
+# DevOps and configuration
+Dockerfile @Mustafa-Shoukat1
+docker-compose.yml @Mustafa-Shoukat1
+.github/ @Mustafa-Shoukat1

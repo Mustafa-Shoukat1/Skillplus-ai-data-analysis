@@ -108,18 +108,7 @@ app.include_router(data_analysis.router, prefix=settings.API_PREFIX)
 app.include_router(templates.router, prefix=settings.API_PREFIX)
 
 def main():
-    import uvicorn
-    uvicorn.run(
-        "main:app",
-        host=settings.HOST,
-        port=settings.PORT,
-        reload=settings.DEBUG,
-        log_level="debug" if settings.DEBUG else "info"
-    )
-
-
-if __name__ == "__main__":
-    main()
+    """Run the application with uvicorn"""
     import uvicorn
     uvicorn.run(
         "main:app",

@@ -1,0 +1,38 @@
+# SkillsPulse Backend Requirements
+# Core Framework
+fastapi>=0.116.1
+uvicorn>=0.35.0
+python-multipart>=0.0.20
+
+# Database
+sqlalchemy>=2.0.0
+aiosqlite>=0.21.0
+aiofiles>=24.1.0
+
+# Authentication
+python-jose>=3.5.0
+passlib>=1.7.4
+bcrypt==4.0.1
+
+# AI/ML - LangChain & LangGraph
+langchain>=0.3.27
+langchain-anthropic>=0.3.17
+langchain-experimental>=0.3.4
+langchain-openai>=0.3.28
+langgraph>=0.5.4
+
+# Data Processing
+pandas>=2.3.1
+numpy>=1.26.0
+openpyxl>=3.1.5
+
+# Visualization
+matplotlib>=3.10.3
+plotly>=6.2.0
+seaborn>=0.13.2
+
+# Configuration
+pydantic>=2.11.7
+pydantic-settings>=2.10.1
+pydantic[email]>=2.11.7
+python-dotenv>=1.1.1
