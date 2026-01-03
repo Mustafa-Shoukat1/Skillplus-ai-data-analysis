@@ -1,0 +1,69 @@
+# Operating System
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+
+# IDE/Editor
+.idea/
+.vscode/
+*.sublime-project
+*.sublime-workspace
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+.env
+*.egg-info/
+dist/
+build/
+
+# Node.js
+node_modules/
+.pnpm-store/
+
+# Environment files with secrets
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# Logs
+*.log
+logs/
+
+# Database
+*.sqlite
+*.db
+database/*.sqlite
+
+# Uploads (keep directory but ignore uploaded files)
+uploads/*.csv
+uploads/*.xlsx
+uploads/*.xls
+!uploads/.gitkeep
+
+# Generated files
+plots/*.html
+!plots/.gitkeep
+generated_charts/
+
+# Testing
+.coverage
+htmlcov/
+.pytest_cache/
+.tox/
+
+# Build outputs
+.next/
+out/
+dist/
+
+# Misc
+*.bak
+*.tmp
