@@ -1,0 +1,30 @@
+# Prettier ignore file
+
+# Build outputs
+.next/
+out/
+build/
+dist/
+
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Generated files
+*.min.js
+*.min.css
+pnpm-lock.yaml
+package-lock.json
+yarn.lock
+
+# Cache
+.cache/
+*.tsbuildinfo
+
+# IDE
+.idea/
+.vscode/
+
+# Misc
+coverage/
+.nyc_output/

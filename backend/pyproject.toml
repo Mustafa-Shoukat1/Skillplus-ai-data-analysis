@@ -1,9 +1,20 @@
 [project]
-name = "backend"
-version = "0.1.0"
-description = "Add your description here"
+name = "skillspulse-backend"
+version = "1.0.0"
+description = "SkillsPulse AI-Powered Data Analysis Platform - Backend API"
 readme = "README.md"
 requires-python = ">=3.12"
+license = {text = "MIT"}
+authors = [
+    {name = "Mustafa Shoukat", email = "mustafa@skillspulse.com"}
+]
+keywords = ["fastapi", "ai", "data-analysis", "langchain", "visualization"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Framework :: FastAPI",
+    "Programming Language :: Python :: 3.12",
+    "License :: OSI Approved :: MIT License"
+]
 dependencies = [
     "aiofiles>=24.1.0",
     "aiosqlite>=0.21.0",
@@ -27,3 +38,28 @@ dependencies = [
     "seaborn>=0.13.2",
     "uvicorn>=0.35.0",
 ]
+
+[project.optional-dependencies]
+dev = ["pytest", "pytest-asyncio", "pytest-cov", "ruff", "black"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_functions = ["test_*"]
+asyncio_mode = "auto"
+addopts = "-v --tb=short"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "UP", "B"]
+ignore = ["E501"]
+
+[tool.coverage.run]
+source = ["."]
+omit = ["tests/*", "venv/*"]
+
+[tool.coverage.report]
+exclude_lines = ["pragma: no cover", "raise NotImplementedError"]
